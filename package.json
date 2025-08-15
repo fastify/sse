@@ -1,0 +1,42 @@
+{
+  "name": "@fastify/sse",
+  "version": "0.0.1",
+  "description": "Server-Sent Events plugin for Fastify",
+  "main": "index.js",
+  "types": "types/index.d.ts",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "lint": "standard",
+    "lint:fix": "standard --fix"
+  },
+  "keywords": [
+    "fastify",
+    "sse",
+    "server-sent-events",
+    "streaming",
+    "real-time"
+  ],
+  "author": "Fastify Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fastify/fastify-sse.git"
+  },
+  "bugs": {
+    "url": "https://github.com/fastify/fastify-sse/issues"
+  },
+  "homepage": "https://github.com/fastify/fastify-sse#readme",
+  "peerDependencies": {
+    "fastify": "^5.x"
+  },
+  "dependencies": {
+    "fastify-plugin": "^5.0.0"
+  },
+  "devDependencies": {
+    "fastify": "^5.0.0",
+    "standard": "^17.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
