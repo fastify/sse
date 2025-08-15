@@ -150,3 +150,6 @@ bun.lockb
 
 # tap files
 .tap/
+
+# CLAUDE.md file
+CLAUDE.md
