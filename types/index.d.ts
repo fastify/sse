@@ -59,14 +59,19 @@ export type SSESource =
 
 export interface SSEReplyInterface {
   /**
-   * Send an SSE event or stream
-   */
-  (source: SSESource): Promise<void>
-
-  /**
    * Last Event ID sent by the client
    */
   readonly lastEventId: string | null
+
+  /**
+   * Send an SSE event or stream
+   */
+  send(source: SSESource): Promise<void>
+
+  /**
+   * Create a transform stream for pipeline operations
+   */
+  stream(): NodeJS.WritableStream
 
   /**
    * Keep the connection alive (prevent handler from closing it)

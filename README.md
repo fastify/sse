@@ -120,7 +120,46 @@ const transformStream = new Transform({
   }
 })
 someSource.pipe(transformStream)
-await reply.sse(transformStream)
+await reply.sse.send(transformStream)
+```
+
+### reply.sse.stream()
+
+Create a transform stream for use in pipeline operations:
+
+```js
+// Use with pipeline for efficient streaming
+const { pipeline } = require('stream/promises')
+const fs = require('fs')
+
+fastify.get('/file-stream', { sse: true }, async (request, reply) => {
+  const fileStream = fs.createReadStream('data.jsonl')
+  
+  // Parse each line as JSON and convert to SSE format
+  const parseTransform = new Transform({
+    transform(chunk, encoding, callback) {
+      const lines = chunk.toString().split('\n').filter(Boolean)
+      for (const line of lines) {
+        try {
+          const data = JSON.parse(line)
+          this.push({ id: data.id, data })
+        } catch (err) {
+          // Skip invalid JSON lines
+        }
+      }
+      callback()
+    }
+  })
+  
+  // Stream file data through SSE
+  await pipeline(
+    fileStream,
+    parseTransform,
+    reply.sse.stream(),
+    reply.raw,
+    { end: false }
+  )
+})
 ```
 
 ### Connection Management
@@ -319,7 +358,7 @@ app.get('/events', { sse: true }, async (request, reply) => {
     data: { hello: 'world' }
   }
   
-  await reply.sse(message)
+  await reply.sse.send(message)
   
   // TypeScript knows about SSE properties
   console.log(reply.sse.isConnected) // boolean

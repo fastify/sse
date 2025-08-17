@@ -16,7 +16,7 @@ test('Last-Event-ID header parsing', async (t) => {
 
   fastify.get('/events', { sse: true }, async (request, reply) => {
     assert.strictEqual(reply.sse.lastEventId, '42')
-    await reply.sse({ id: '43', data: 'next event' })
+    await reply.sse.send({ id: '43', data: 'next event' })
   })
 
   await fastify.listen({ port: 0 })
@@ -58,13 +58,13 @@ test('replay functionality', async (t) => {
       const lastId = parseInt(lastEventId)
       for (const [id, event] of eventStore) {
         if (parseInt(id) > lastId) {
-          await reply.sse(event)
+          await reply.sse.send(event)
         }
       }
     })
 
     // Send new event
-    await reply.sse({ id: '4', data: 'latest' })
+    await reply.sse.send({ id: '4', data: 'latest' })
   })
 
   await fastify.listen({ port: 0 })
@@ -102,7 +102,7 @@ test('connection state during handler execution', async (t) => {
   fastify.get('/events', { sse: true }, async (request, reply) => {
     // Check connection state during handler execution
     connectionStateInHandler = reply.sse.isConnected
-    await reply.sse({ data: 'connected' })
+    await reply.sse.send({ data: 'connected' })
   })
 
   await fastify.listen({ port: 0 })
@@ -142,7 +142,7 @@ test('SSE interface methods exist', async (t) => {
     assert.strictEqual(typeof reply.sse.onClose, 'function')
     assert.strictEqual(typeof reply.sse.isConnected, 'boolean')
     
-    await reply.sse({ data: 'test' })
+    await reply.sse.send({ data: 'test' })
   })
 
   await fastify.listen({ port: 0 })
@@ -175,9 +175,9 @@ test('error handling in async iterator', async (t) => {
     }
 
     try {
-      await reply.sse(errorGenerator())
+      await reply.sse.send(errorGenerator())
     } catch (error) {
-      await reply.sse({ data: 'error handled' })
+      await reply.sse.send({ data: 'error handled' })
     }
   })
 

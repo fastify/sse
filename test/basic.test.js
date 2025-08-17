@@ -16,7 +16,7 @@ test('basic SSE functionality', async (t) => {
   await fastify.register(fastifySSE)
 
   fastify.get('/events', { sse: true }, async (request, reply) => {
-    await reply.sse({ data: 'hello world' })
+    await reply.sse.send({ data: 'hello world' })
   })
 
   await fastify.listen({ port: 0 })
@@ -49,7 +49,7 @@ test('SSE message formatting', async (t) => {
   await fastify.register(fastifySSE)
 
   fastify.get('/events', { sse: true }, async (request, reply) => {
-    await reply.sse({
+    await reply.sse.send({
       id: '123',
       event: 'update',
       data: { message: 'test' },
@@ -84,7 +84,7 @@ test('string message support', async (t) => {
   await fastify.register(fastifySSE)
 
   fastify.get('/events', { sse: true }, async (request, reply) => {
-    await reply.sse('plain text message')
+    await reply.sse.send('plain text message')
   })
 
   await fastify.listen({ port: 0 })
@@ -111,7 +111,7 @@ test('multiline data handling', async (t) => {
   await fastify.register(fastifySSE)
 
   fastify.get('/events', { sse: true }, async (request, reply) => {
-    await reply.sse({ data: 'line1\nline2\nline3' })
+    await reply.sse.send({ data: 'line1\nline2\nline3' })
   })
 
   await fastify.listen({ port: 0 })
@@ -144,7 +144,7 @@ test('async generator support', async (t) => {
       yield { id: '3', data: 'third' }
     }
 
-    await reply.sse(generate())
+    await reply.sse.send(generate())
   })
 
   await fastify.listen({ port: 0 })
@@ -182,7 +182,7 @@ test('readable stream support', async (t) => {
       { id: 'c', data: 'gamma' }
     ])
 
-    await reply.sse(stream)
+    await reply.sse.send(stream)
   })
 
   await fastify.listen({ port: 0 })
@@ -215,7 +215,7 @@ test('fallback to regular handler when SSE not requested', async (t) => {
     // Only use SSE if the accept header is for SSE
     const acceptHeader = request.headers.accept || ''
     if (acceptHeader.includes('text/event-stream')) {
-      await reply.sse({ data: 'sse data' })
+      await reply.sse.send({ data: 'sse data' })
     } else {
       return { message: 'regular response' }
     }
@@ -251,7 +251,7 @@ test('custom serializer', async (t) => {
   })
 
   fastify.get('/events', { sse: true }, async (request, reply) => {
-    await reply.sse({ data: 'test' })
+    await reply.sse.send({ data: 'test' })
   })
 
   await fastify.listen({ port: 0 })
@@ -266,4 +266,46 @@ test('custom serializer', async (t) => {
 
   const body = response.body
   assert.ok(body.includes('data: custom:test'))
+})
+
+test('reply.sse.stream() for pipeline operations', async (t) => {
+  const fastify = Fastify({ logger: false })
+  
+  t.after(async () => {
+    await fastify.close()
+  })
+
+  await fastify.register(fastifySSE)
+
+  fastify.get('/pipeline', { sse: true }, async (request, reply) => {
+    const { pipeline } = require('stream/promises')
+    
+    // Create a source stream with test data
+    const sourceStream = Readable.from([
+      { id: '1', data: 'first' },
+      { id: '2', data: 'second' },
+      { id: '3', data: 'third' }
+    ])
+
+    // Use reply.sse.stream() in a pipeline
+    await pipeline(sourceStream, reply.sse.stream(), reply.raw, { end: false })
+  })
+
+  await fastify.listen({ port: 0 })
+
+  const response = await fastify.inject({
+    method: 'GET',
+    url: '/pipeline',
+    headers: {
+      accept: 'text/event-stream'
+    }
+  })
+
+  const body = response.body
+  assert.ok(body.includes('id: 1'))
+  assert.ok(body.includes('data: "first"'))
+  assert.ok(body.includes('id: 2'))
+  assert.ok(body.includes('data: "second"'))
+  assert.ok(body.includes('id: 3'))
+  assert.ok(body.includes('data: "third"'))
 })

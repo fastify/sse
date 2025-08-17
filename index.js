@@ -167,6 +167,14 @@ class SSEContext {
     throw new TypeError('Invalid SSE source type')
   }
 
+  stream () {
+    if (!this._isConnected) {
+      throw new Error('SSE connection is closed')
+    }
+
+    return createSSETransformStream({ serializer: this.serializer })
+  }
+
   async writeToStream (data) {
     return new Promise((resolve, reject) => {
       if (!this._isConnected) {
@@ -283,15 +291,15 @@ async function fastifySSE (fastify, opts) {
       reply[SSE_CONTEXT] = context
 
       // Decorate reply with SSE interface
-      const sseInterface = async function sse (source) {
-        return context.send(source)
-      }
+      const sseInterface = {}
 
       // Add SSE methods
       Object.defineProperty(sseInterface, 'lastEventId', {
         get: () => context.lastEventId
       })
 
+      sseInterface.send = (source) => context.send(source)
+      sseInterface.stream = () => context.stream()
       sseInterface.keepAlive = () => context.keepAlive()
       sseInterface.close = () => context.close()
       sseInterface.replay = (callback) => context.replay(callback)

@@ -8,11 +8,11 @@ fastify.register(require('../index.js'))
 // Basic SSE endpoint
 fastify.get('/events', { sse: true }, async (request, reply) => {
   // Send a simple message
-  await reply.sse({ data: 'Hello SSE!' })
+  await reply.sse.send({ data: 'Hello SSE!' })
   
   // Send multiple events
   for (let i = 0; i < 5; i++) {
-    await reply.sse({
+    await reply.sse.send({
       id: String(i),
       event: 'counter',
       data: { count: i, timestamp: Date.now() }
@@ -35,7 +35,7 @@ fastify.get('/stream', { sse: true }, async (request, reply) => {
     }
   }
   
-  await reply.sse(generateEvents())
+  await reply.sse.send(generateEvents())
 })
 
 // Persistent connection with keepAlive
@@ -44,13 +44,13 @@ fastify.get('/live', { sse: true }, async (request, reply) => {
   reply.sse.keepAlive()
   
   // Send initial event
-  await reply.sse({ data: 'Connected to live stream' })
+  await reply.sse.send({ data: 'Connected to live stream' })
   
   // Send periodic updates
   const interval = setInterval(async () => {
     try {
       if (reply.sse.isConnected) {
-        await reply.sse({
+        await reply.sse.send({
           event: 'heartbeat',
           data: { timestamp: Date.now() }
         })
@@ -82,7 +82,7 @@ fastify.get('/replay', { sse: true }, async (request, reply) => {
       : messageHistory
     
     for (const message of messagesToReplay) {
-      await reply.sse(message)
+      await reply.sse.send(message)
     }
   })
   
@@ -99,7 +99,7 @@ fastify.get('/replay', { sse: true }, async (request, reply) => {
     messageHistory.shift()
   }
   
-  await reply.sse(newMessage)
+  await reply.sse.send(newMessage)
 })
 
 // Start the server
