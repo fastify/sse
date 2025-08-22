@@ -8,7 +8,7 @@ const fastifySSE = require('../index.js')
 
 test('basic SSE functionality', async (t) => {
   const fastify = Fastify({ logger: false })
-  
+
   t.after(async () => {
     await fastify.close()
   })
@@ -32,8 +32,8 @@ test('basic SSE functionality', async (t) => {
   assert.strictEqual(response.statusCode, 200)
   assert.strictEqual(response.headers['content-type'], 'text/event-stream')
   assert.strictEqual(response.headers['cache-control'], 'no-cache')
-  assert.strictEqual(response.headers['connection'], 'keep-alive')
-  
+  assert.strictEqual(response.headers.connection, 'keep-alive')
+
   const body = response.body
   assert.ok(body.includes('data: "hello world"'))
   assert.ok(body.endsWith('\n\n'))
@@ -41,7 +41,7 @@ test('basic SSE functionality', async (t) => {
 
 test('SSE message formatting', async (t) => {
   const fastify = Fastify({ logger: false })
-  
+
   t.after(async () => {
     await fastify.close()
   })
@@ -76,7 +76,7 @@ test('SSE message formatting', async (t) => {
 
 test('string message support', async (t) => {
   const fastify = Fastify({ logger: false })
-  
+
   t.after(async () => {
     await fastify.close()
   })
@@ -103,7 +103,7 @@ test('string message support', async (t) => {
 
 test('multiline data handling', async (t) => {
   const fastify = Fastify({ logger: false })
-  
+
   t.after(async () => {
     await fastify.close()
   })
@@ -130,7 +130,7 @@ test('multiline data handling', async (t) => {
 
 test('async generator support', async (t) => {
   const fastify = Fastify({ logger: false })
-  
+
   t.after(async () => {
     await fastify.close()
   })
@@ -138,7 +138,7 @@ test('async generator support', async (t) => {
   await fastify.register(fastifySSE)
 
   fastify.get('/stream', { sse: true }, async (request, reply) => {
-    async function* generate () {
+    async function * generate () {
       yield { id: '1', data: 'first' }
       yield { id: '2', data: 'second' }
       yield { id: '3', data: 'third' }
@@ -168,7 +168,7 @@ test('async generator support', async (t) => {
 
 test('readable stream support', async (t) => {
   const fastify = Fastify({ logger: false })
-  
+
   t.after(async () => {
     await fastify.close()
   })
@@ -204,7 +204,7 @@ test('readable stream support', async (t) => {
 
 test('fallback to regular handler when SSE not requested', async (t) => {
   const fastify = Fastify({ logger: false })
-  
+
   t.after(async () => {
     await fastify.close()
   })
@@ -234,14 +234,14 @@ test('fallback to regular handler when SSE not requested', async (t) => {
 
   assert.strictEqual(response.statusCode, 200)
   assert.strictEqual(response.headers['content-type'], 'application/json; charset=utf-8')
-  
+
   const body = JSON.parse(response.body)
   assert.deepStrictEqual(body, { message: 'regular response' })
 })
 
 test('custom serializer', async (t) => {
   const fastify = Fastify({ logger: false })
-  
+
   t.after(async () => {
     await fastify.close()
   })
@@ -270,7 +270,7 @@ test('custom serializer', async (t) => {
 
 test('reply.sse.stream() for pipeline operations', async (t) => {
   const fastify = Fastify({ logger: false })
-  
+
   t.after(async () => {
     await fastify.close()
   })
@@ -279,7 +279,7 @@ test('reply.sse.stream() for pipeline operations', async (t) => {
 
   fastify.get('/pipeline', { sse: true }, async (request, reply) => {
     const { pipeline } = require('stream/promises')
-    
+
     // Create a source stream with test data
     const sourceStream = Readable.from([
       { id: '1', data: 'first' },

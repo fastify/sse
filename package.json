@@ -5,7 +5,7 @@
   "main": "index.js",
   "types": "types/index.d.ts",
   "scripts": {
-    "test": "node --test test/*.test.js",
+    "test": "node --test test/basic.test.js test/lifecycle.test.js",
     "lint": "standard",
     "lint:fix": "standard --fix"
   },

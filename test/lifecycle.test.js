@@ -7,7 +7,7 @@ const fastifySSE = require('../index.js')
 
 test('Last-Event-ID header parsing', async (t) => {
   const fastify = Fastify({ logger: false })
-  
+
   t.after(async () => {
     await fastify.close()
   })
@@ -38,7 +38,7 @@ test('Last-Event-ID header parsing', async (t) => {
 
 test('replay functionality', async (t) => {
   const fastify = Fastify({ logger: false })
-  
+
   t.after(async () => {
     await fastify.close()
   })
@@ -90,7 +90,7 @@ test('replay functionality', async (t) => {
 
 test('connection state during handler execution', async (t) => {
   const fastify = Fastify({ logger: false })
-  
+
   t.after(async () => {
     await fastify.close()
   })
@@ -98,7 +98,7 @@ test('connection state during handler execution', async (t) => {
   await fastify.register(fastifySSE)
 
   let connectionStateInHandler = false
-  
+
   fastify.get('/events', { sse: true }, async (request, reply) => {
     // Check connection state during handler execution
     connectionStateInHandler = reply.sse.isConnected
@@ -116,14 +116,14 @@ test('connection state during handler execution', async (t) => {
   })
 
   assert.strictEqual(response.statusCode, 200)
-  
+
   // Connection should have been active during handler execution
   assert.strictEqual(connectionStateInHandler, true)
 })
 
 test('SSE interface methods exist', async (t) => {
   const fastify = Fastify({ logger: false })
-  
+
   t.after(async () => {
     await fastify.close()
   })
@@ -131,17 +131,17 @@ test('SSE interface methods exist', async (t) => {
   await fastify.register(fastifySSE)
 
   let sseInterface
-  
+
   fastify.get('/events', { sse: true }, async (request, reply) => {
     sseInterface = reply.sse
-    
+
     // Test interface methods exist
     assert.strictEqual(typeof reply.sse.keepAlive, 'function')
     assert.strictEqual(typeof reply.sse.close, 'function')
     assert.strictEqual(typeof reply.sse.replay, 'function')
     assert.strictEqual(typeof reply.sse.onClose, 'function')
     assert.strictEqual(typeof reply.sse.isConnected, 'boolean')
-    
+
     await reply.sse.send({ data: 'test' })
   })
 
@@ -161,7 +161,7 @@ test('SSE interface methods exist', async (t) => {
 
 test('error handling in async iterator', async (t) => {
   const fastify = Fastify({ logger: false })
-  
+
   t.after(async () => {
     await fastify.close()
   })
@@ -169,7 +169,7 @@ test('error handling in async iterator', async (t) => {
   await fastify.register(fastifySSE)
 
   fastify.get('/error-stream', { sse: true }, async (request, reply) => {
-    async function* errorGenerator () {
+    async function * errorGenerator () {
       yield { id: '1', data: 'before error' }
       throw new Error('Stream error')
     }
