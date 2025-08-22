@@ -32,10 +32,10 @@ await fastify.register(require('@fastify/sse'))
 // Create an SSE endpoint
 fastify.get('/events', { sse: true }, async (request, reply) => {
   // Send a message
-  await reply.sse({ data: 'Hello SSE!' })
+  await reply.sse.send({ data: 'Hello SSE!' })
   
   // Send with full options
-  await reply.sse({
+  await reply.sse.send({
     id: '123',
     event: 'update', 
     data: { message: 'Hello World' },
@@ -75,7 +75,7 @@ fastify.get('/events', {
 }, handler)
 ```
 
-### reply.sse(source)
+### reply.sse.send(source)
 
 Send SSE messages. Accepts various source types:
 
@@ -83,10 +83,10 @@ Send SSE messages. Accepts various source types:
 
 ```js
 // Simple data
-await reply.sse({ data: 'hello' })
+await reply.sse.send({ data: 'hello' })
 
 // Full SSE message
-await reply.sse({
+await reply.sse.send({
   id: '123',
   event: 'update',
   data: { message: 'Hello' },
@@ -94,7 +94,7 @@ await reply.sse({
 })
 
 // Plain string
-await reply.sse('plain text message')
+await reply.sse.send('plain text message')
 ```
 
 #### Streaming Sources
@@ -107,11 +107,11 @@ async function* generateEvents() {
     await sleep(1000)
   }
 }
-await reply.sse(generateEvents())
+await reply.sse.send(generateEvents())
 
 // Node.js Readable stream
 const stream = fs.createReadStream('data.jsonl')
-await reply.sse(stream)
+await reply.sse.send(stream)
 
 // Transform existing stream
 const transformStream = new Transform({
@@ -170,12 +170,12 @@ fastify.get('/live', { sse: true }, async (request, reply) => {
   reply.sse.keepAlive()
   
   // Send initial message
-  await reply.sse({ data: 'Connected' })
+  await reply.sse.send({ data: 'Connected' })
   
   // Set up periodic updates
   const interval = setInterval(async () => {
     if (reply.sse.isConnected) {
-      await reply.sse({ data: 'ping' })
+      await reply.sse.send({ data: 'ping' })
     } else {
       clearInterval(interval)
     }
@@ -207,14 +207,14 @@ fastify.get('/events', { sse: true }, async (request, reply) => {
     
     // Send missed messages
     for (const message of messagesToReplay) {
-      await reply.sse(message)
+      await reply.sse.send(message)
     }
   })
   
   // Send new message
   const newMessage = { id: Date.now(), data: 'New event' }
   messageHistory.push(newMessage)
-  await reply.sse(newMessage)
+  await reply.sse.send(newMessage)
 })
 ```
 
@@ -240,7 +240,7 @@ fastify.get('/data', { sse: true }, async (request, reply) => {
   // Check if this is an SSE request
   if (request.headers.accept?.includes('text/event-stream')) {
     // SSE client - stream the data
-    await reply.sse({ data })
+    await reply.sse.send({ data })
   } else {
     // Regular client - return JSON
     return { data }
@@ -258,10 +258,10 @@ fastify.get('/stream', { sse: true }, async (request, reply) => {
       throw new Error('Something went wrong')
     }
     
-    await reply.sse(riskyGenerator())
+    await reply.sse.send(riskyGenerator())
   } catch (error) {
     // Handle errors gracefully
-    await reply.sse({ 
+    await reply.sse.send({ 
       event: 'error',
       data: { message: 'Stream error occurred' }
     })
@@ -286,7 +286,7 @@ fastify.get('/custom', {
     serializer: (data) => `CUSTOM:${JSON.stringify(data)}`
   }
 }, async (request, reply) => {
-  await reply.sse({ data: 'test' }) // Outputs: "CUSTOM:\"test\""
+  await reply.sse.send({ data: 'test' }) // Outputs: "CUSTOM:\"test\""
 })
 ```
 
