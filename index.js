@@ -175,7 +175,7 @@ class SSEContext {
     return createSSETransformStream({ serializer: this.serializer })
   }
 
-  async writeToStream (data) {
+  writeToStream (data) {
     return new Promise((resolve, reject) => {
       if (!this._isConnected) {
         reject(new Error('SSE connection is closed'))
