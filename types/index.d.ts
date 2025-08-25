@@ -1,11 +1,12 @@
 import { Readable } from 'stream'
+import { FastifyPluginAsync } from 'fastify'
 
 declare module 'fastify' {
   interface FastifyReply {
     sse: SSEReplyInterface
   }
 
-  interface RouteOptions {
+  interface RouteShorthandOptions {
     sse?: boolean | {
       heartbeat?: boolean
       serializer?: (data: any) => string
