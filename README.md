@@ -1,7 +1,7 @@
 # @fastify/sse
 
 [![NPM Version](https://img.shields.io/npm/v/@fastify/sse.svg)](https://npmjs.org/package/@fastify/sse)
-[![CI](https://github.com/fastify/fastify-sse/workflows/CI/badge.svg)](https://github.com/fastify/fastify-sse/actions)
+[![CI](https://github.com/fastify/sse/workflows/CI/badge.svg)](https://github.com/fastify/sse/actions)
 
 Server-Sent Events plugin for Fastify. Provides first-class SSE support with clean API integration, session management, and streaming capabilities.
 
