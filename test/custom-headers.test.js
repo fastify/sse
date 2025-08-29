@@ -78,3 +78,49 @@ test('should allow setting headers via reply.header() method', async (t) => {
   assert.strictEqual(response.headers['x-request-id'], 'req-123')
   assert.strictEqual(response.headers['x-user-id'], 'user-456')
 })
+
+test('should allow setting headers in preHandler hook', async (t) => {
+  const fastify = Fastify({ logger: false })
+
+  t.after(async () => {
+    await fastify.close()
+  })
+
+  await fastify.register(fastifySSE)
+
+  fastify.get('/events', {
+    sse: true,
+    preHandler: async (request, reply) => {
+      // Set headers in preHandler using both methods
+      reply.header('X-PreHandler-ID', 'pre-123')
+      reply.raw.setHeader('X-PreHandler-Raw', 'raw-456')
+    }
+  }, async (request, reply) => {
+    // Also set headers in handler
+    reply.header('X-Handler-ID', 'handler-789')
+
+    await reply.sse.send({ data: 'prehandler test' })
+  })
+
+  await fastify.listen({ port: 0 })
+
+  const response = await fastify.inject({
+    method: 'GET',
+    url: '/events',
+    headers: {
+      accept: 'text/event-stream'
+    }
+  })
+
+  assert.strictEqual(response.statusCode, 200)
+
+  // Check that headers set in preHandler are present
+  assert.strictEqual(response.headers['x-prehandler-id'], 'pre-123')
+  assert.strictEqual(response.headers['x-prehandler-raw'], 'raw-456')
+
+  // Check that headers set in handler are also present
+  assert.strictEqual(response.headers['x-handler-id'], 'handler-789')
+
+  const body = response.body
+  assert.ok(body.includes('data: "prehandler test"'))
+})
