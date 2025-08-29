@@ -89,6 +89,7 @@ class SSEContext {
     this._lastEventId = options.lastEventId || null
     this._isConnected = true
     this._keepAlive = false
+    this._headersSent = false
     this.heartbeatTimer = null
     this.closeCallbacks = []
     this.serializer = options.serializer
@@ -149,6 +150,18 @@ class SSEContext {
 
     // Handle Readable stream
     if (source instanceof Readable) {
+      // Send headers if not yet sent
+      if (!this._headersSent) {
+        // Get any headers set via reply.header() and transfer to raw response
+        const replyHeaders = this.reply.getHeaders()
+        for (const [name, value] of Object.entries(replyHeaders)) {
+          this.reply.raw.setHeader(name, value)
+        }
+
+        this.reply.raw.writeHead(200)
+        this._headersSent = true
+      }
+
       const transform = createSSETransformStream({ serializer: this.serializer })
       await pipeline(source, transform, this.reply.raw, { end: false })
       return
@@ -172,7 +185,26 @@ class SSEContext {
       throw new Error('SSE connection is closed')
     }
 
-    return createSSETransformStream({ serializer: this.serializer })
+    const transform = createSSETransformStream({ serializer: this.serializer })
+
+    // Wrap the transform to send headers on first write
+    const originalWrite = transform._write
+    transform._write = (chunk, encoding, callback) => {
+      // Send headers if not yet sent
+      if (!this._headersSent) {
+        // Get any headers set via reply.header() and transfer to raw response
+        const replyHeaders = this.reply.getHeaders()
+        for (const [name, value] of Object.entries(replyHeaders)) {
+          this.reply.raw.setHeader(name, value)
+        }
+
+        this.reply.raw.writeHead(200)
+        this._headersSent = true
+      }
+      originalWrite.call(transform, chunk, encoding, callback)
+    }
+
+    return transform
   }
 
   writeToStream (data) {
@@ -180,6 +212,18 @@ class SSEContext {
       if (!this._isConnected) {
         reject(new Error('SSE connection is closed'))
         return
+      }
+
+      // Send headers on first write
+      if (!this._headersSent) {
+        // Get any headers set via reply.header() and transfer to raw response
+        const replyHeaders = this.reply.getHeaders()
+        for (const [name, value] of Object.entries(replyHeaders)) {
+          this.reply.raw.setHeader(name, value)
+        }
+
+        this.reply.raw.writeHead(200)
+        this._headersSent = true
       }
 
       const canWrite = this.reply.raw.write(data)
@@ -207,6 +251,17 @@ class SSEContext {
   startHeartbeat (interval) {
     this.heartbeatTimer = setInterval(() => {
       if (this._isConnected) {
+        // Send headers if not yet sent
+        if (!this._headersSent) {
+          // Get any headers set via reply.header() and transfer to raw response
+          const replyHeaders = this.reply.getHeaders()
+          for (const [name, value] of Object.entries(replyHeaders)) {
+            this.reply.raw.setHeader(name, value)
+          }
+
+          this.reply.raw.writeHead(200)
+          this._headersSent = true
+        }
         this.reply.raw.write(': heartbeat\n\n')
       } else {
         this.stopHeartbeat()
@@ -314,10 +369,8 @@ async function fastifySSE (fastify, opts) {
         get () { return this[SSE_DECORATOR] }
       })
 
-      // Send 200 OK
-      reply.raw.writeHead(200)
-
       // Call original handler with SSE-enabled reply
+      // Note: Headers will be sent on first SSE send
       try {
         await originalHandler.call(this, request, reply)
       } catch (error) {
