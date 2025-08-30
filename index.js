@@ -89,6 +89,7 @@ class SSEContext {
     this._lastEventId = options.lastEventId || null
     this._isConnected = true
     this._keepAlive = false
+    this._headersSent = false
     this.heartbeatTimer = null
     this.closeCallbacks = []
     this.serializer = options.serializer
@@ -105,18 +106,34 @@ class SSEContext {
     }
   }
 
+  /**
+   * Gets the last event ID from the client's Last-Event-ID header.
+   * @returns {string|null} The last event ID or null if not present
+   */
   get lastEventId () {
     return this._lastEventId
   }
 
+  /**
+   * Checks if the SSE connection is still active.
+   * @returns {boolean} True if connected, false otherwise
+   */
   get isConnected () {
     return this._isConnected
   }
 
+  /**
+   * Marks the connection to be kept alive after the handler completes.
+   * Without calling this, the connection will close after the handler returns.
+   */
   keepAlive () {
     this._keepAlive = true
   }
 
+  /**
+   * Closes the SSE connection and performs cleanup.
+   * Safe to call multiple times.
+   */
   close () {
     if (!this._isConnected) return
 
@@ -125,16 +142,51 @@ class SSEContext {
     this.reply.raw.end()
   }
 
+  /**
+   * Registers a callback to be called when the connection closes.
+   * @param {Function} callback - Function to call on connection close
+   */
   onClose (callback) {
     this.closeCallbacks.push(callback)
   }
 
+  /**
+   * Executes a callback with the last event ID for replay functionality.
+   * Only calls the callback if a last event ID exists.
+   * @param {Function} callback - Async function that receives the last event ID
+   */
   async replay (callback) {
     if (!this._lastEventId) return
 
     await callback(this._lastEventId)
   }
 
+  /**
+   * Sends HTTP headers for the SSE response if not already sent.
+   * This method ensures headers set via reply.header() are transferred
+   * to the raw response before calling writeHead(200).
+   * Called automatically before the first SSE data is sent.
+   * @private
+   */
+  sendHeaders () {
+    if (!this._headersSent) {
+      // Get any headers set via reply.header() and transfer to raw response
+      const replyHeaders = this.reply.getHeaders()
+      for (const [name, value] of Object.entries(replyHeaders)) {
+        this.reply.raw.setHeader(name, value)
+      }
+
+      this.reply.raw.writeHead(200)
+      this._headersSent = true
+    }
+  }
+
+  /**
+   * Sends SSE data from various source types.
+   * @param {string|Buffer|Object|ReadableStream|AsyncIterable} source - The data source to send
+   * @throws {Error} If connection is closed
+   * @throws {TypeError} If source type is invalid
+   */
   async send (source) {
     if (!this._isConnected) {
       throw new Error('SSE connection is closed')
@@ -149,6 +201,8 @@ class SSEContext {
 
     // Handle Readable stream
     if (source instanceof Readable) {
+      this.sendHeaders()
+
       const transform = createSSETransformStream({ serializer: this.serializer })
       await pipeline(source, transform, this.reply.raw, { end: false })
       return
@@ -167,20 +221,44 @@ class SSEContext {
     throw new TypeError('Invalid SSE source type')
   }
 
+  /**
+   * Creates a transform stream for SSE formatting.
+   * The returned stream automatically sends headers on first write.
+   * @returns {Transform} A transform stream that formats data as SSE
+   * @throws {Error} If connection is closed
+   */
   stream () {
     if (!this._isConnected) {
       throw new Error('SSE connection is closed')
     }
 
-    return createSSETransformStream({ serializer: this.serializer })
+    const transform = createSSETransformStream({ serializer: this.serializer })
+
+    // Wrap the transform to send headers on first write
+    const originalWrite = transform._write
+    transform._write = (chunk, encoding, callback) => {
+      this.sendHeaders()
+      originalWrite.call(transform, chunk, encoding, callback)
+    }
+
+    return transform
   }
 
+  /**
+   * Writes data to the response stream with backpressure handling.
+   * @param {string|Buffer} data - The data to write
+   * @returns {Promise<void>} Resolves when data is written
+   * @private
+   */
   writeToStream (data) {
     return new Promise((resolve, reject) => {
       if (!this._isConnected) {
         reject(new Error('SSE connection is closed'))
         return
       }
+
+      // Send headers on first write
+      this.sendHeaders()
 
       const canWrite = this.reply.raw.write(data)
 
@@ -204,9 +282,15 @@ class SSEContext {
     })
   }
 
+  /**
+   * Starts sending periodic heartbeat messages to keep the connection alive.
+   * @param {number} interval - Heartbeat interval in milliseconds
+   * @private
+   */
   startHeartbeat (interval) {
     this.heartbeatTimer = setInterval(() => {
       if (this._isConnected) {
+        this.sendHeaders()
         this.reply.raw.write(': heartbeat\n\n')
       } else {
         this.stopHeartbeat()
@@ -217,6 +301,10 @@ class SSEContext {
     this.heartbeatTimer.unref()
   }
 
+  /**
+   * Stops the heartbeat timer.
+   * @private
+   */
   stopHeartbeat () {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer)
@@ -224,6 +312,11 @@ class SSEContext {
     }
   }
 
+  /**
+   * Performs cleanup operations when the connection closes.
+   * Stops heartbeat and executes all registered close callbacks.
+   * @private
+   */
   cleanup () {
     this.stopHeartbeat()
 
@@ -240,12 +333,24 @@ class SSEContext {
     this.closeCallbacks = []
   }
 
+  /**
+   * Checks if a value is a valid SSE message object.
+   * @param {*} value - The value to check
+   * @returns {boolean} True if value is an SSE message object
+   * @private
+   */
   isSSEMessage (value) {
     return typeof value === 'object' &&
            value !== null &&
            'data' in value
   }
 
+  /**
+   * Checks if a value is an async iterable.
+   * @param {*} value - The value to check
+   * @returns {boolean} True if value is async iterable
+   * @private
+   */
   isAsyncIterable (value) {
     return value != null &&
            typeof value[Symbol.asyncIterator] === 'function'
@@ -314,10 +419,8 @@ async function fastifySSE (fastify, opts) {
         get () { return this[SSE_DECORATOR] }
       })
 
-      // Send 200 OK
-      reply.raw.writeHead(200)
-
       // Call original handler with SSE-enabled reply
+      // Note: Headers will be sent on first SSE send
       try {
         await originalHandler.call(this, request, reply)
       } catch (error) {
