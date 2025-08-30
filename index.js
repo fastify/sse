@@ -136,6 +136,13 @@ class SSEContext {
     await callback(this._lastEventId)
   }
 
+  /**
+   * Sends HTTP headers for the SSE response if not already sent.
+   * This method ensures headers set via reply.header() are transferred
+   * to the raw response before calling writeHead(200).
+   * Called automatically before the first SSE data is sent.
+   * @private
+   */
   sendHeaders () {
     if (!this._headersSent) {
       // Get any headers set via reply.header() and transfer to raw response
