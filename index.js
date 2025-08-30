@@ -106,18 +106,34 @@ class SSEContext {
     }
   }
 
+  /**
+   * Gets the last event ID from the client's Last-Event-ID header.
+   * @returns {string|null} The last event ID or null if not present
+   */
   get lastEventId () {
     return this._lastEventId
   }
 
+  /**
+   * Checks if the SSE connection is still active.
+   * @returns {boolean} True if connected, false otherwise
+   */
   get isConnected () {
     return this._isConnected
   }
 
+  /**
+   * Marks the connection to be kept alive after the handler completes.
+   * Without calling this, the connection will close after the handler returns.
+   */
   keepAlive () {
     this._keepAlive = true
   }
 
+  /**
+   * Closes the SSE connection and performs cleanup.
+   * Safe to call multiple times.
+   */
   close () {
     if (!this._isConnected) return
 
@@ -126,10 +142,19 @@ class SSEContext {
     this.reply.raw.end()
   }
 
+  /**
+   * Registers a callback to be called when the connection closes.
+   * @param {Function} callback - Function to call on connection close
+   */
   onClose (callback) {
     this.closeCallbacks.push(callback)
   }
 
+  /**
+   * Executes a callback with the last event ID for replay functionality.
+   * Only calls the callback if a last event ID exists.
+   * @param {Function} callback - Async function that receives the last event ID
+   */
   async replay (callback) {
     if (!this._lastEventId) return
 
@@ -156,6 +181,12 @@ class SSEContext {
     }
   }
 
+  /**
+   * Sends SSE data from various source types.
+   * @param {string|Buffer|Object|ReadableStream|AsyncIterable} source - The data source to send
+   * @throws {Error} If connection is closed
+   * @throws {TypeError} If source type is invalid
+   */
   async send (source) {
     if (!this._isConnected) {
       throw new Error('SSE connection is closed')
@@ -190,6 +221,12 @@ class SSEContext {
     throw new TypeError('Invalid SSE source type')
   }
 
+  /**
+   * Creates a transform stream for SSE formatting.
+   * The returned stream automatically sends headers on first write.
+   * @returns {Transform} A transform stream that formats data as SSE
+   * @throws {Error} If connection is closed
+   */
   stream () {
     if (!this._isConnected) {
       throw new Error('SSE connection is closed')
@@ -207,6 +244,12 @@ class SSEContext {
     return transform
   }
 
+  /**
+   * Writes data to the response stream with backpressure handling.
+   * @param {string|Buffer} data - The data to write
+   * @returns {Promise<void>} Resolves when data is written
+   * @private
+   */
   writeToStream (data) {
     return new Promise((resolve, reject) => {
       if (!this._isConnected) {
@@ -239,6 +282,11 @@ class SSEContext {
     })
   }
 
+  /**
+   * Starts sending periodic heartbeat messages to keep the connection alive.
+   * @param {number} interval - Heartbeat interval in milliseconds
+   * @private
+   */
   startHeartbeat (interval) {
     this.heartbeatTimer = setInterval(() => {
       if (this._isConnected) {
@@ -253,6 +301,10 @@ class SSEContext {
     this.heartbeatTimer.unref()
   }
 
+  /**
+   * Stops the heartbeat timer.
+   * @private
+   */
   stopHeartbeat () {
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer)
@@ -260,6 +312,11 @@ class SSEContext {
     }
   }
 
+  /**
+   * Performs cleanup operations when the connection closes.
+   * Stops heartbeat and executes all registered close callbacks.
+   * @private
+   */
   cleanup () {
     this.stopHeartbeat()
 
@@ -276,12 +333,24 @@ class SSEContext {
     this.closeCallbacks = []
   }
 
+  /**
+   * Checks if a value is a valid SSE message object.
+   * @param {*} value - The value to check
+   * @returns {boolean} True if value is an SSE message object
+   * @private
+   */
   isSSEMessage (value) {
     return typeof value === 'object' &&
            value !== null &&
            'data' in value
   }
 
+  /**
+   * Checks if a value is an async iterable.
+   * @param {*} value - The value to check
+   * @returns {boolean} True if value is async iterable
+   * @private
+   */
   isAsyncIterable (value) {
     return value != null &&
            typeof value[Symbol.asyncIterator] === 'function'
