@@ -102,15 +102,11 @@ class SSEContext {
 
     // Handle errors on the raw response to prevent uncaught exceptions
     this.reply.raw.on('error', (error) => {
-      // Common errors when client disconnects abruptly
-      if (error.code === 'UND_ERR_ABORTED' || error.code === 'ECONNRESET' || error.code === 'EPIPE') {
-        // Client disconnected, this is expected behavior
-        this._isConnected = false
-        this.cleanup()
-        return
-      }
-      // Log other errors but don't throw
-      console.error('SSE connection error:', error)
+      // Client disconnection is expected behavior, handle gracefully
+      this._isConnected = false
+      this.cleanup()
+      // Log as info since client disconnections are normal
+      this.reply.log.info({ err: error }, 'SSE connection closed')
     })
 
     // Start heartbeat if enabled
@@ -220,15 +216,11 @@ class SSEContext {
       try {
         await pipeline(source, transform, this.reply.raw, { end: false })
       } catch (error) {
-        // Handle client disconnection gracefully
-        if (error.code === 'UND_ERR_ABORTED' || error.code === 'ECONNRESET' || error.code === 'EPIPE') {
-          // Client disconnected, this is expected behavior
-          this._isConnected = false
-          this.cleanup()
-          return
-        }
-        // Re-throw other errors
-        throw error
+        // Handle all errors gracefully - client disconnection is normal
+        this._isConnected = false
+        this.cleanup()
+        this.reply.log.info({ err: error }, 'SSE stream ended')
+        return
       }
       return
     }
@@ -298,14 +290,11 @@ class SSEContext {
 
         const onError = (err) => {
           this.reply.raw.off('drain', onDrain)
-          // Handle client disconnection gracefully
-          if (err.code === 'UND_ERR_ABORTED' || err.code === 'ECONNRESET' || err.code === 'EPIPE') {
-            this._isConnected = false
-            this.cleanup()
-            resolve() // Resolve instead of reject for graceful disconnection
-            return
-          }
-          reject(err)
+          // Handle all errors gracefully - client disconnection is normal
+          this._isConnected = false
+          this.cleanup()
+          this.reply.log.info({ err }, 'SSE write ended')
+          resolve() // Resolve instead of reject for graceful handling
         }
 
         this.reply.raw.once('drain', onDrain)
