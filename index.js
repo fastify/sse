@@ -100,6 +100,19 @@ class SSEContext {
       this.cleanup()
     })
 
+    // Handle errors on the raw response to prevent uncaught exceptions
+    this.reply.raw.on('error', (error) => {
+      // Common errors when client disconnects abruptly
+      if (error.code === 'UND_ERR_ABORTED' || error.code === 'ECONNRESET' || error.code === 'EPIPE') {
+        // Client disconnected, this is expected behavior
+        this._isConnected = false
+        this.cleanup()
+        return
+      }
+      // Log other errors but don't throw
+      console.error('SSE connection error:', error)
+    })
+
     // Start heartbeat if enabled
     if (options.heartbeatInterval > 0) {
       this.startHeartbeat(options.heartbeatInterval)
@@ -204,7 +217,19 @@ class SSEContext {
       this.sendHeaders()
 
       const transform = createSSETransformStream({ serializer: this.serializer })
-      await pipeline(source, transform, this.reply.raw, { end: false })
+      try {
+        await pipeline(source, transform, this.reply.raw, { end: false })
+      } catch (error) {
+        // Handle client disconnection gracefully
+        if (error.code === 'UND_ERR_ABORTED' || error.code === 'ECONNRESET' || error.code === 'EPIPE') {
+          // Client disconnected, this is expected behavior
+          this._isConnected = false
+          this.cleanup()
+          return
+        }
+        // Re-throw other errors
+        throw error
+      }
       return
     }
 
@@ -273,6 +298,13 @@ class SSEContext {
 
         const onError = (err) => {
           this.reply.raw.off('drain', onDrain)
+          // Handle client disconnection gracefully
+          if (err.code === 'UND_ERR_ABORTED' || err.code === 'ECONNRESET' || err.code === 'EPIPE') {
+            this._isConnected = false
+            this.cleanup()
+            resolve() // Resolve instead of reject for graceful disconnection
+            return
+          }
           reject(err)
         }
 
