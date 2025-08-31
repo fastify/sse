@@ -2,6 +2,7 @@
 
 const { test } = require('node:test')
 const { strict: assert } = require('node:assert')
+const { setTimeout: sleep } = require('node:timers/promises')
 const Fastify = require('fastify')
 const { request } = require('undici')
 
@@ -39,13 +40,13 @@ test('handles body.destroy() without uncaught exception', async (t) => {
   sseResponse.body.on('data', () => {})
 
   // Wait for connection to be established
-  await new Promise(resolve => setTimeout(resolve, 50))
+  await sleep(50)
 
   // Destroy the body - should not cause uncaught exception
   sseResponse.body.destroy()
 
   // Wait to ensure no uncaught exceptions occur
-  await new Promise(resolve => setTimeout(resolve, 100))
+  await sleep(100)
 })
 
 test('handles body.destroy() with keepAlive connection', async (t) => {
@@ -82,13 +83,13 @@ test('handles body.destroy() with keepAlive connection', async (t) => {
   sseResponse.body.on('data', () => {})
 
   // Wait for connection to be established
-  await new Promise(resolve => setTimeout(resolve, 50))
+  await sleep(50)
 
   // Destroy the body - should not cause uncaught exception
   sseResponse.body.destroy()
 
   // Wait to ensure no uncaught exceptions occur
-  await new Promise(resolve => setTimeout(resolve, 100))
+  await sleep(100)
 })
 
 test('handles body.destroy() with streaming data', async (t) => {
@@ -148,12 +149,12 @@ test('handles body.destroy() with streaming data', async (t) => {
   })
 
   // Wait for some data to be received
-  await new Promise(resolve => setTimeout(resolve, 100))
+  await sleep(100)
   assert.ok(dataReceived, 'Should have received some data')
 
   // Destroy the body while streaming - should not cause uncaught exception
   sseResponse.body.destroy()
 
   // Wait to ensure no uncaught exceptions occur
-  await new Promise(resolve => setTimeout(resolve, 100))
+  await sleep(100)
 })
