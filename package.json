@@ -24,12 +24,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/fastify/fastify-sse.git"
+    "url": "https://github.com/fastify/sse.git"
   },
   "bugs": {
-    "url": "https://github.com/fastify/fastify-sse/issues"
+    "url": "https://github.com/fastify/sse/issues"
   },
-  "homepage": "https://github.com/fastify/fastify-sse#readme",
+  "homepage": "https://github.com/fastify/sse#readme",
   "peerDependencies": {
     "fastify": "^5.x"
   },
@@ -45,6 +45,6 @@
     "typescript": "^5.9.2"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20"
   }
 }
