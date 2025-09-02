@@ -100,6 +100,15 @@ class SSEContext {
       this.cleanup()
     })
 
+    // Handle errors on the raw response to prevent uncaught exceptions
+    this.reply.raw.on('error', (error) => {
+      // Client disconnection is expected behavior, handle gracefully
+      this._isConnected = false
+      this.cleanup()
+      // Log as info since client disconnections are normal
+      this.reply.log.info({ err: error }, 'SSE connection closed')
+    })
+
     // Start heartbeat if enabled
     if (options.heartbeatInterval > 0) {
       this.startHeartbeat(options.heartbeatInterval)
@@ -204,7 +213,15 @@ class SSEContext {
       this.sendHeaders()
 
       const transform = createSSETransformStream({ serializer: this.serializer })
-      await pipeline(source, transform, this.reply.raw, { end: false })
+      try {
+        await pipeline(source, transform, this.reply.raw, { end: false })
+      } catch (error) {
+        // Handle all errors gracefully - client disconnection is normal
+        this._isConnected = false
+        this.cleanup()
+        this.reply.log.info({ err: error }, 'SSE stream ended')
+        return
+      }
       return
     }
 
@@ -273,7 +290,11 @@ class SSEContext {
 
         const onError = (err) => {
           this.reply.raw.off('drain', onDrain)
-          reject(err)
+          // Handle all errors gracefully - client disconnection is normal
+          this._isConnected = false
+          this.cleanup()
+          this.reply.log.info({ err }, 'SSE write ended')
+          resolve() // Resolve instead of reject for graceful handling
         }
 
         this.reply.raw.once('drain', onDrain)
