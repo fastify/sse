@@ -216,10 +216,14 @@ class SSEContext {
       try {
         await pipeline(source, transform, this.reply.raw, { end: false })
       } catch (error) {
-        // Handle all errors gracefully - client disconnection is normal
+        // Distinguish between expected disconnection errors and unexpected errors
         this._isConnected = false
         this.cleanup()
-        this.reply.log.info({ err: error }, 'SSE stream ended')
+        if (error && (error.code === 'ECONNRESET' || error.code === 'EPIPE')) {
+          this.reply.log.info({ err: error }, 'SSE stream ended (client disconnected)')
+        } else {
+          this.reply.log.error({ err: error }, 'Unexpected error in SSE stream')
+        }
         return
       }
       return
