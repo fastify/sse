@@ -121,7 +121,7 @@ test('handles body.destroy() with streaming data', async (t) => {
       } else {
         clearInterval(interval)
       }
-    }, 10)
+    }, 100)
 
     reply.sse.onClose(() => {
       clearInterval(interval)
