@@ -4,9 +4,6 @@ const fp = require('fastify-plugin')
 const { Readable, Transform } = require('stream')
 const { pipeline } = require('stream/promises')
 
-const SSE_DECORATOR = Symbol.for('@fastify/sse.decorator')
-const SSE_CONTEXT = Symbol.for('@fastify/sse.context')
-
 /**
  * Format an SSE message according to the specification
  * @param {Object|string|Buffer} message - The message to format
@@ -174,8 +171,8 @@ class SSEContext {
    * Sends HTTP headers for the SSE response if not already sent.
    * This method ensures headers set via reply.header() are transferred
    * to the raw response before calling writeHead(200).
-   * Called automatically before the first SSE data is sent.
-   * @private
+   * Called automatically before the first SSE data is sent, but can
+   * also be called manually if needed.
    */
   sendHeaders () {
     if (!this._headersSent) {
@@ -418,48 +415,27 @@ async function fastifySSE (fastify, opts) {
       })
 
       // Store context on reply
-      reply[SSE_CONTEXT] = context
+      reply.sse = context
 
-      // Decorate reply with SSE interface
-      const sseInterface = {}
-
-      // Add SSE methods
-      Object.defineProperty(sseInterface, 'lastEventId', {
-        get: () => context.lastEventId
-      })
-
-      sseInterface.send = (source) => context.send(source)
-      sseInterface.stream = () => context.stream()
-      sseInterface.keepAlive = () => context.keepAlive()
-      sseInterface.close = () => context.close()
-      sseInterface.replay = (callback) => context.replay(callback)
-      sseInterface.onClose = (callback) => context.onClose(callback)
-
-      Object.defineProperty(sseInterface, 'isConnected', {
-        get: () => context.isConnected
-      })
-
-      reply[SSE_DECORATOR] = sseInterface
-      Object.defineProperty(reply, 'sse', {
-        get () { return this[SSE_DECORATOR] }
-      })
-
+      let res
       // Call original handler with SSE-enabled reply
       // Note: Headers will be sent on first SSE send
       try {
-        await originalHandler.call(this, request, reply)
+        res = await originalHandler.call(this, request, reply)
       } catch (error) {
         // If handler doesn't call keepAlive, close connection
-        if (!reply[SSE_CONTEXT]?._keepAlive) {
-          reply[SSE_CONTEXT]?.close()
+        if (!context._keepAlive) {
+          context.close()
         }
         throw error
       }
 
       // If handler doesn't call keepAlive, close connection
-      if (!reply[SSE_CONTEXT]?._keepAlive) {
-        reply[SSE_CONTEXT]?.close()
+      if (!context._keepAlive) {
+        context.close()
       }
+
+      return res
     }
   })
 }

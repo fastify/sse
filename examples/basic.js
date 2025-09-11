@@ -69,6 +69,26 @@ fastify.get('/live', { sse: true }, async (request, reply) => {
   })
 })
 
+// Custom headers with sendHeaders
+fastify.get('/headers', { sse: true }, async (request, reply) => {
+  // Set custom headers using Fastify's header methods
+  reply.header('X-Session-ID', 'session-12345')
+  reply.header('X-API-Version', 'v1.2.3')
+  reply.headers({
+    'X-User-Agent': request.headers['user-agent'] || 'unknown',
+    'X-Request-Time': new Date().toISOString()
+  })
+
+  // Manually send headers before any SSE data
+  reply.sse.sendHeaders()
+
+  // Now send SSE data
+  await reply.sse.send({
+    data: 'Headers sent manually before this message',
+    event: 'custom-headers'
+  })
+})
+
 // Replay functionality
 const messageHistory = []
 let eventId = 0
@@ -111,6 +131,7 @@ const start = async () => {
     console.log('  GET /events - Basic SSE messages')
     console.log('  GET /stream - Streaming with async generator')
     console.log('  GET /live - Persistent connection with heartbeat')
+    console.log('  GET /headers - Custom headers with sendHeaders()')
     console.log('  GET /replay - Messages with replay support')
   } catch (err) {
     fastify.log.error(err)

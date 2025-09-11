@@ -98,6 +98,15 @@ export interface SSEReplyInterface {
    * Check if the connection is still active
    */
   readonly isConnected: boolean
+
+  /**
+   * Send HTTP headers for the SSE response if not already sent.
+   * This method ensures headers set via reply.header() are transferred
+   * to the raw response before calling writeHead(200).
+   * Called automatically before the first SSE data is sent, but can
+   * also be called manually if needed.
+   */
+  sendHeaders(): void
 }
 
 declare const fastifySSE: FastifyPluginAsync<SSEPluginOptions>
