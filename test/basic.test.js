@@ -19,8 +19,6 @@ test('basic SSE functionality', async (t) => {
     await reply.sse.send({ data: 'hello world' })
   })
 
-  await fastify.listen({ port: 0 })
-
   const response = await fastify.inject({
     method: 'GET',
     url: '/events',
@@ -57,8 +55,6 @@ test('SSE message formatting', async (t) => {
     })
   })
 
-  await fastify.listen({ port: 0 })
-
   const response = await fastify.inject({
     method: 'GET',
     url: '/events',
@@ -87,8 +83,6 @@ test('string message support', async (t) => {
     await reply.sse.send('plain text message')
   })
 
-  await fastify.listen({ port: 0 })
-
   const response = await fastify.inject({
     method: 'GET',
     url: '/events',
@@ -113,8 +107,6 @@ test('multiline data handling', async (t) => {
   fastify.get('/events', { sse: true }, async (request, reply) => {
     await reply.sse.send({ data: 'line1\nline2\nline3' })
   })
-
-  await fastify.listen({ port: 0 })
 
   const response = await fastify.inject({
     method: 'GET',
@@ -146,8 +138,6 @@ test('async generator support', async (t) => {
 
     await reply.sse.send(generate())
   })
-
-  await fastify.listen({ port: 0 })
 
   const response = await fastify.inject({
     method: 'GET',
@@ -184,8 +174,6 @@ test('readable stream support', async (t) => {
 
     await reply.sse.send(stream)
   })
-
-  await fastify.listen({ port: 0 })
 
   const response = await fastify.inject({
     method: 'GET',
@@ -254,8 +242,6 @@ test('custom serializer', async (t) => {
     await reply.sse.send({ data: 'test' })
   })
 
-  await fastify.listen({ port: 0 })
-
   const response = await fastify.inject({
     method: 'GET',
     url: '/events',
@@ -290,8 +276,6 @@ test('reply.sse.stream() for pipeline operations', async (t) => {
     // Use reply.sse.stream() in a pipeline
     await pipeline(sourceStream, reply.sse.stream(), reply.raw, { end: false })
   })
-
-  await fastify.listen({ port: 0 })
 
   const response = await fastify.inject({
     method: 'GET',

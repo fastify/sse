@@ -19,8 +19,6 @@ test('Last-Event-ID header parsing', async (t) => {
     await reply.sse.send({ id: '43', data: 'next event' })
   })
 
-  await fastify.listen({ port: 0 })
-
   const response = await fastify.inject({
     method: 'GET',
     url: '/events',
@@ -67,8 +65,6 @@ test('replay functionality', async (t) => {
     await reply.sse.send({ id: '4', data: 'latest' })
   })
 
-  await fastify.listen({ port: 0 })
-
   const response = await fastify.inject({
     method: 'GET',
     url: '/events',
@@ -104,8 +100,6 @@ test('connection state during handler execution', async (t) => {
     connectionStateInHandler = reply.sse.isConnected
     await reply.sse.send({ data: 'connected' })
   })
-
-  await fastify.listen({ port: 0 })
 
   const response = await fastify.inject({
     method: 'GET',
@@ -145,8 +139,6 @@ test('SSE interface methods exist', async (t) => {
     await reply.sse.send({ data: 'test' })
   })
 
-  await fastify.listen({ port: 0 })
-
   const response = await fastify.inject({
     method: 'GET',
     url: '/events',
@@ -180,8 +172,6 @@ test('error handling in async iterator', async (t) => {
       await reply.sse.send({ data: 'error handled' })
     }
   })
-
-  await fastify.listen({ port: 0 })
 
   const response = await fastify.inject({
     method: 'GET',
