@@ -1,6 +1,6 @@
 {
   "name": "@fastify/sse",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Server-Sent Events plugin for Fastify",
   "main": "index.js",
   "types": "types/index.d.ts",
