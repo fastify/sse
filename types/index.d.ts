@@ -100,6 +100,11 @@ export interface SSEReplyInterface {
   readonly isConnected: boolean
 
   /**
+   * Check if the connection should be kept alive after handler completion
+   */
+  readonly shouldKeepAlive: boolean
+
+  /**
    * Send HTTP headers for the SSE response if not already sent.
    * This method ensures headers set via reply.header() are transferred
    * to the raw response before calling writeHead(200).

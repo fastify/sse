@@ -168,10 +168,13 @@ fastify.get('/file-stream', { sse: true }, async (request, reply) => {
 fastify.get('/live', { sse: true }, async (request, reply) => {
   // Keep connection alive (prevents automatic close)
   reply.sse.keepAlive()
-  
+
   // Send initial message
   await reply.sse.send({ data: 'Connected' })
-  
+
+  // Check if keepAlive was called
+  console.log('Keep alive status:', reply.sse.shouldKeepAlive) // true
+
   // Set up periodic updates
   const interval = setInterval(async () => {
     if (reply.sse.isConnected) {
@@ -180,7 +183,7 @@ fastify.get('/live', { sse: true }, async (request, reply) => {
       clearInterval(interval)
     }
   }, 1000)
-  
+
   // Clean up when connection closes
   reply.sse.onClose(() => {
     clearInterval(interval)
@@ -220,12 +223,19 @@ fastify.get('/events', { sse: true }, async (request, reply) => {
 
 ### Properties and Methods
 
-- `reply.sse.lastEventId`: Client's last received event ID
+#### Properties
+- `reply.sse.lastEventId`: Client's last received event ID (string | null)
 - `reply.sse.isConnected`: Connection status (boolean)
-- `reply.sse.keepAlive()`: Prevent connection from auto-closing
+- `reply.sse.shouldKeepAlive`: Whether connection should be kept alive after handler completion (boolean)
+
+#### Methods
+- `reply.sse.send(source)`: Send SSE messages from various source types
+- `reply.sse.stream()`: Create a transform stream for pipeline operations
+- `reply.sse.keepAlive()`: Prevent connection from auto-closing after handler returns
 - `reply.sse.close()`: Manually close the connection
-- `reply.sse.replay(callback)`: Handle message replay
-- `reply.sse.onClose(callback)`: Register close callback
+- `reply.sse.replay(callback)`: Handle message replay using Last-Event-ID
+- `reply.sse.onClose(callback)`: Register callback for when connection closes
+- `reply.sse.sendHeaders()`: Manually send headers (called automatically on first write)
 
 ## Advanced Usage
 
@@ -357,12 +367,13 @@ app.get('/events', { sse: true }, async (request, reply) => {
     event: 'test',
     data: { hello: 'world' }
   }
-  
+
   await reply.sse.send(message)
-  
+
   // TypeScript knows about SSE properties
   console.log(reply.sse.isConnected) // boolean
   console.log(reply.sse.lastEventId) // string | null
+  console.log(reply.sse.shouldKeepAlive) // boolean
 })
 ```
 
