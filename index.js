@@ -4,9 +4,6 @@ const fp = require('fastify-plugin')
 const { Readable, Transform } = require('stream')
 const { pipeline } = require('stream/promises')
 
-const SSE_DECORATOR = Symbol.for('@fastify/sse.decorator')
-const SSE_CONTEXT = Symbol.for('@fastify/sse.context')
-
 /**
  * Format an SSE message according to the specification
  * @param {Object|string|Buffer} message - The message to format
@@ -84,26 +81,31 @@ function createSSETransformStream (options = {}) {
  * SSE Context class for managing connection state
  */
 class SSEContext {
+  #lastEventId
+  #isConnected
+  #keepAlive
+  #headersSent
+
   constructor (options) {
     this.reply = options.reply
-    this._lastEventId = options.lastEventId || null
-    this._isConnected = true
-    this._keepAlive = false
-    this._headersSent = false
+    this.#lastEventId = options.lastEventId || null
+    this.#isConnected = true
+    this.#keepAlive = false
+    this.#headersSent = false
     this.heartbeatTimer = null
     this.closeCallbacks = []
     this.serializer = options.serializer
 
     // Set up connection close handler
     this.reply.raw.on('close', () => {
-      this._isConnected = false
+      this.#isConnected = false
       this.cleanup()
     })
 
     // Handle errors on the raw response to prevent uncaught exceptions
     this.reply.raw.on('error', (error) => {
       // Client disconnection is expected behavior, handle gracefully
-      this._isConnected = false
+      this.#isConnected = false
       this.cleanup()
       // Log as info since client disconnections are normal
       this.reply.log.info({ err: error }, 'SSE connection closed')
@@ -120,7 +122,7 @@ class SSEContext {
    * @returns {string|null} The last event ID or null if not present
    */
   get lastEventId () {
-    return this._lastEventId
+    return this.#lastEventId
   }
 
   /**
@@ -128,7 +130,15 @@ class SSEContext {
    * @returns {boolean} True if connected, false otherwise
    */
   get isConnected () {
-    return this._isConnected
+    return this.#isConnected
+  }
+
+  /**
+   * Checks if the connection should be kept alive after handler completion.
+   * @returns {boolean} True if connection should be kept alive
+   */
+  get shouldKeepAlive () {
+    return this.#keepAlive
   }
 
   /**
@@ -136,7 +146,7 @@ class SSEContext {
    * Without calling this, the connection will close after the handler returns.
    */
   keepAlive () {
-    this._keepAlive = true
+    this.#keepAlive = true
   }
 
   /**
@@ -144,9 +154,9 @@ class SSEContext {
    * Safe to call multiple times.
    */
   close () {
-    if (!this._isConnected) return
+    if (!this.#isConnected) return
 
-    this._isConnected = false
+    this.#isConnected = false
     this.cleanup()
     this.reply.raw.end()
   }
@@ -165,20 +175,20 @@ class SSEContext {
    * @param {Function} callback - Async function that receives the last event ID
    */
   async replay (callback) {
-    if (!this._lastEventId) return
+    if (!this.#lastEventId) return
 
-    await callback(this._lastEventId)
+    await callback(this.#lastEventId)
   }
 
   /**
    * Sends HTTP headers for the SSE response if not already sent.
    * This method ensures headers set via reply.header() are transferred
    * to the raw response before calling writeHead(200).
-   * Called automatically before the first SSE data is sent.
-   * @private
+   * Called automatically before the first SSE data is sent, but can
+   * also be called manually if needed.
    */
   sendHeaders () {
-    if (!this._headersSent) {
+    if (!this.#headersSent) {
       // Get any headers set via reply.header() and transfer to raw response
       const replyHeaders = this.reply.getHeaders()
       for (const [name, value] of Object.entries(replyHeaders)) {
@@ -186,7 +196,7 @@ class SSEContext {
       }
 
       this.reply.raw.writeHead(200)
-      this._headersSent = true
+      this.#headersSent = true
     }
   }
 
@@ -197,7 +207,7 @@ class SSEContext {
    * @throws {TypeError} If source type is invalid
    */
   async send (source) {
-    if (!this._isConnected) {
+    if (!this.#isConnected) {
       throw new Error('SSE connection is closed')
     }
 
@@ -217,7 +227,7 @@ class SSEContext {
         await pipeline(source, transform, this.reply.raw, { end: false })
       } catch (error) {
         // Distinguish between expected disconnection errors and unexpected errors
-        this._isConnected = false
+        this.#isConnected = false
         this.cleanup()
         if (error && (error.code === 'ECONNRESET' || error.code === 'EPIPE')) {
           this.reply.log.info({ err: error }, 'SSE stream ended (client disconnected)')
@@ -232,7 +242,7 @@ class SSEContext {
     // Handle AsyncIterable
     if (this.isAsyncIterable(source)) {
       for await (const chunk of source) {
-        if (!this._isConnected) break
+        if (!this.#isConnected) break
         const formatted = formatSSEMessage(chunk, this.serializer)
         await this.writeToStream(formatted)
       }
@@ -249,7 +259,7 @@ class SSEContext {
    * @throws {Error} If connection is closed
    */
   stream () {
-    if (!this._isConnected) {
+    if (!this.#isConnected) {
       throw new Error('SSE connection is closed')
     }
 
@@ -273,7 +283,7 @@ class SSEContext {
    */
   writeToStream (data) {
     return new Promise((resolve, reject) => {
-      if (!this._isConnected) {
+      if (!this.#isConnected) {
         reject(new Error('SSE connection is closed'))
         return
       }
@@ -295,7 +305,7 @@ class SSEContext {
         const onError = (err) => {
           this.reply.raw.off('drain', onDrain)
           // Handle all errors gracefully - client disconnection is normal
-          this._isConnected = false
+          this.#isConnected = false
           this.cleanup()
           this.reply.log.info({ err }, 'SSE write ended')
           resolve() // Resolve instead of reject for graceful handling
@@ -314,7 +324,7 @@ class SSEContext {
    */
   startHeartbeat (interval) {
     this.heartbeatTimer = setInterval(() => {
-      if (this._isConnected) {
+      if (this.#isConnected) {
         this.sendHeaders()
         this.reply.raw.write(': heartbeat\n\n')
       } else {
@@ -418,48 +428,27 @@ async function fastifySSE (fastify, opts) {
       })
 
       // Store context on reply
-      reply[SSE_CONTEXT] = context
+      reply.sse = context
 
-      // Decorate reply with SSE interface
-      const sseInterface = {}
-
-      // Add SSE methods
-      Object.defineProperty(sseInterface, 'lastEventId', {
-        get: () => context.lastEventId
-      })
-
-      sseInterface.send = (source) => context.send(source)
-      sseInterface.stream = () => context.stream()
-      sseInterface.keepAlive = () => context.keepAlive()
-      sseInterface.close = () => context.close()
-      sseInterface.replay = (callback) => context.replay(callback)
-      sseInterface.onClose = (callback) => context.onClose(callback)
-
-      Object.defineProperty(sseInterface, 'isConnected', {
-        get: () => context.isConnected
-      })
-
-      reply[SSE_DECORATOR] = sseInterface
-      Object.defineProperty(reply, 'sse', {
-        get () { return this[SSE_DECORATOR] }
-      })
-
+      let res
       // Call original handler with SSE-enabled reply
       // Note: Headers will be sent on first SSE send
       try {
-        await originalHandler.call(this, request, reply)
+        res = await originalHandler.call(this, request, reply)
       } catch (error) {
         // If handler doesn't call keepAlive, close connection
-        if (!reply[SSE_CONTEXT]?._keepAlive) {
-          reply[SSE_CONTEXT]?.close()
+        if (!context.shouldKeepAlive) {
+          context.close()
         }
         throw error
       }
 
       // If handler doesn't call keepAlive, close connection
-      if (!reply[SSE_CONTEXT]?._keepAlive) {
-        reply[SSE_CONTEXT]?.close()
+      if (!context.shouldKeepAlive) {
+        context.close()
       }
+
+      return res
     }
   })
 }

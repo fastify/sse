@@ -23,8 +23,6 @@ test('should allow setting custom headers in SSE responses', async (t) => {
     await reply.sse.send({ data: 'hello' })
   })
 
-  await fastify.listen({ port: 0 })
-
   const response = await fastify.inject({
     method: 'GET',
     url: '/events',
@@ -61,8 +59,6 @@ test('should allow setting headers via reply.header() method', async (t) => {
 
     await reply.sse.send({ data: 'test' })
   })
-
-  await fastify.listen({ port: 0 })
 
   const response = await fastify.inject({
     method: 'GET',
@@ -101,8 +97,6 @@ test('should allow setting headers in preHandler hook', async (t) => {
 
     await reply.sse.send({ data: 'prehandler test' })
   })
-
-  await fastify.listen({ port: 0 })
 
   const response = await fastify.inject({
     method: 'GET',
