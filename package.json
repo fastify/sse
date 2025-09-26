@@ -5,8 +5,9 @@
   "main": "index.js",
   "types": "types/index.d.ts",
   "scripts": {
-    "test": "node --test",
-    "test:types": "tsd",
+    "test": "npm run test:unit && npm run test:typescript",
+    "test:unit": "node --test",
+    "test:typescript": "tsd",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix"
   },
