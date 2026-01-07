@@ -457,3 +457,5 @@ module.exports = fp(fastifySSE, {
   fastify: '5.x',
   name: '@fastify/sse'
 })
+module.exports.default = fastifySSE
+module.exports.fastifySSE = fastifySSE
