@@ -1,5 +1,5 @@
-import { Readable } from 'stream'
 import { FastifyPluginAsync } from 'fastify'
+import { Readable } from 'stream'
 
 declare module 'fastify' {
   interface FastifyReply {
@@ -114,6 +114,6 @@ export interface SSEReplyInterface {
   sendHeaders(): void
 }
 
-declare const fastifySSE: FastifyPluginAsync<SSEPluginOptions>
+export declare const fastifySSE: FastifyPluginAsync<SSEPluginOptions>
 
 export default fastifySSE
