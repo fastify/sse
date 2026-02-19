@@ -1,7 +1,8 @@
 # @fastify/sse
 
-[![NPM Version](https://img.shields.io/npm/v/@fastify/sse.svg)](https://npmjs.org/package/@fastify/sse)
+[![NPM Version](https://img.shields.io/npm/v/@fastify/sse.svg?style=flat)](https://www.npmjs.com/package/@fastify/sse)
 [![CI](https://github.com/fastify/sse/workflows/CI/badge.svg)](https://github.com/fastify/sse/actions)
+[![neostandard javascript style](https://img.shields.io/badge/code_style-neostandard-brightgreen?style=flat)](https://github.com/neostandard/neostandard)
 
 Server-Sent Events plugin for Fastify. Provides first-class SSE support with clean API integration, session management, and streaming capabilities.
 
@@ -224,11 +225,13 @@ fastify.get('/events', { sse: true }, async (request, reply) => {
 ### Properties and Methods
 
 #### Properties
+
 - `reply.sse.lastEventId`: Client's last received event ID (string | null)
 - `reply.sse.isConnected`: Connection status (boolean)
 - `reply.sse.shouldKeepAlive`: Whether connection should be kept alive after handler completion (boolean)
 
 #### Methods
+
 - `reply.sse.send(source)`: Send SSE messages from various source types
 - `reply.sse.stream()`: Create a transform stream for pipeline operations
 - `reply.sse.keepAlive()`: Prevent connection from auto-closing after handler returns
