@@ -33,11 +33,11 @@ await fastify.register(require('@fastify/sse'))
 fastify.get('/events', { sse: true }, async (request, reply) => {
   // Send a message
   await reply.sse.send({ data: 'Hello SSE!' })
-  
+
   // Send with full options
   await reply.sse.send({
     id: '123',
-    event: 'update', 
+    event: 'update',
     data: { message: 'Hello World' },
     retry: 1000
   })
@@ -54,7 +54,7 @@ await fastify.listen({ port: 3000 })
 await fastify.register(require('@fastify/sse'), {
   // Optional: heartbeat interval in milliseconds (default: 30000)
   heartbeatInterval: 30000,
-  
+
   // Optional: default serializer (default: JSON.stringify)
   serializer: (data) => JSON.stringify(data)
 })
@@ -67,7 +67,7 @@ await fastify.register(require('@fastify/sse'), {
 fastify.get('/events', { sse: true }, handler)
 
 // With options
-fastify.get('/events', { 
+fastify.get('/events', {
   sse: {
     heartbeat: false,           // Disable heartbeat for this route
     serializer: customSerializer // Custom serializer for this route
@@ -134,7 +134,7 @@ const fs = require('fs')
 
 fastify.get('/file-stream', { sse: true }, async (request, reply) => {
   const fileStream = fs.createReadStream('data.jsonl')
-  
+
   // Parse each line as JSON and convert to SSE format
   const parseTransform = new Transform({
     transform(chunk, encoding, callback) {
@@ -150,7 +150,7 @@ fastify.get('/file-stream', { sse: true }, async (request, reply) => {
       callback()
     }
   })
-  
+
   // Stream file data through SSE
   await pipeline(
     fileStream,
@@ -204,16 +204,16 @@ fastify.get('/events', { sse: true }, async (request, reply) => {
   await reply.sse.replay(async (lastEventId) => {
     // Find messages after the last received ID
     const startIndex = messageHistory.findIndex(msg => msg.id === lastEventId)
-    const messagesToReplay = startIndex !== -1 
+    const messagesToReplay = startIndex !== -1
       ? messageHistory.slice(startIndex + 1)
       : messageHistory
-    
+
     // Send missed messages
     for (const message of messagesToReplay) {
       await reply.sse.send(message)
     }
   })
-  
+
   // Send new message
   const newMessage = { id: Date.now(), data: 'New event' }
   messageHistory.push(newMessage)
@@ -246,7 +246,7 @@ Routes with `{ sse: true }` automatically fall back to regular handlers when the
 ```js
 fastify.get('/data', { sse: true }, async (request, reply) => {
   const data = await getData()
-  
+
   // Check if this is an SSE request
   if (request.headers.accept?.includes('text/event-stream')) {
     // SSE client - stream the data
@@ -267,11 +267,11 @@ fastify.get('/stream', { sse: true }, async (request, reply) => {
       yield { data: 'before error' }
       throw new Error('Something went wrong')
     }
-    
+
     await reply.sse.send(riskyGenerator())
   } catch (error) {
     // Handle errors gracefully
-    await reply.sse.send({ 
+    await reply.sse.send({
       event: 'error',
       data: { message: 'Stream error occurred' }
     })
@@ -328,20 +328,20 @@ assert.ok(response.body.includes('data: "Hello SSE!"'))
 </head>
 <body>
   <div id="messages"></div>
-  
+
   <script>
     const eventSource = new EventSource('/events')
     const messagesDiv = document.getElementById('messages')
-    
+
     eventSource.onmessage = function(event) {
       const data = JSON.parse(event.data)
       messagesDiv.innerHTML += '<div>' + JSON.stringify(data) + '</div>'
     }
-    
+
     eventSource.addEventListener('update', function(event) {
       console.log('Update event:', JSON.parse(event.data))
     })
-    
+
     eventSource.onerror = function(event) {
       console.error('SSE error:', event)
     }

@@ -20,7 +20,7 @@ expectAssignable<FastifyInstance>(app.register(fastifySSE, {
   serializer: (data: any) => String(data)
 }))
 
-// Test invalid plugin options  
+// Test invalid plugin options
 expectError(app.register(fastifySSE, {
   heartbeatInterval: 'invalid'
 }))
