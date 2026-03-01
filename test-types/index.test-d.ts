@@ -1,5 +1,7 @@
+'use strict'
+
 import { expectType, expectError, expectAssignable } from 'tsd'
-import fastify, { FastifyInstance, FastifyReply, RouteShorthandOptions } from 'fastify'
+import fastify, { FastifyInstance, RouteShorthandOptions } from 'fastify'
 import fastifySSE, { SSEPluginOptions, SSEMessage, SSESource, SSEReplyInterface } from '..'
 import { Readable } from 'stream'
 
@@ -63,17 +65,26 @@ expectType<string | undefined>(message.id)
 expectType<string | undefined>(message.event)
 expectType<any>(message.data)
 expectType<number | undefined>(message.retry)
+expectAssignable<SSEMessage>(fullMessage)
 
 // Test SSE sources
 const stringSource: SSESource = 'hello'
-const bufferSource: SSESource = Buffer.from('hello')
-const messageSource: SSESource = { data: 'test' }
-const streamSource: SSESource = new Readable()
+expectAssignable<SSESource>(stringSource)
 
-async function* asyncGenerator(): AsyncIterable<SSEMessage> {
+const bufferSource: SSESource = Buffer.from('hello')
+expectAssignable<SSESource>(bufferSource)
+
+const messageSource: SSESource = { data: 'test' }
+expectAssignable<SSESource>(messageSource)
+
+const streamSource: SSESource = new Readable()
+expectAssignable<SSESource>(streamSource)
+
+async function * asyncGenerator (): AsyncIterable<SSEMessage> {
   yield { data: 'test' }
 }
 const asyncIterableSource: SSESource = asyncGenerator()
+expectAssignable<SSESource>(asyncIterableSource)
 
 // Test SSE reply interface
 app.get('/test-reply', { sse: true }, async (request, reply) => {
@@ -130,11 +141,11 @@ const complexMessage: SSEMessage = {
 expectAssignable<SSESource>(complexMessage)
 
 // Test async iterator types
-async function* typedAsyncGenerator(): AsyncIterable<string> {
+async function * typedAsyncGenerator (): AsyncIterable<string> {
   yield 'test'
 }
 
-async function* mixedAsyncGenerator(): AsyncIterable<SSEMessage | string | Buffer> {
+async function * mixedAsyncGenerator (): AsyncIterable<SSEMessage | string | Buffer> {
   yield { data: 'message' }
   yield 'string'
   yield Buffer.from('buffer')
@@ -151,6 +162,7 @@ const pluginOptions: SSEPluginOptions = {
     return JSON.stringify(data)
   }
 }
+expectAssignable<SSEPluginOptions>(pluginOptions)
 
 // Test serializer function type
 const customSerializer = (data: any): string => {
@@ -159,7 +171,6 @@ const customSerializer = (data: any): string => {
   }
   return String(data)
 }
-
 expectAssignable<SSEPluginOptions>({
   serializer: customSerializer
 })
@@ -168,10 +179,12 @@ expectAssignable<SSEPluginOptions>({
 const routeOptions1: RouteShorthandOptions = {
   sse: true
 }
+expectAssignable<RouteShorthandOptions>(routeOptions1)
 
 const routeOptions2: RouteShorthandOptions = {
   sse: false
 }
+expectAssignable<RouteShorthandOptions>(routeOptions2)
 
 const routeOptions3: RouteShorthandOptions = {
   sse: {
@@ -179,6 +192,7 @@ const routeOptions3: RouteShorthandOptions = {
     serializer: (data) => String(data)
   }
 }
+expectAssignable<RouteShorthandOptions>(routeOptions3)
 
 // Test invalid route options - these tests verify type checking
 expectError(app.get('/invalid', {
