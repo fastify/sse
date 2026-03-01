@@ -51,10 +51,10 @@ export interface SSEMessage {
   retry?: number
 }
 
-export type SSESource = 
-  | SSEMessage 
-  | string 
-  | Buffer 
+export type SSESource =
+  | SSEMessage
+  | string
+  | Buffer
   | Readable
   | AsyncIterable<SSEMessage | string | Buffer>
 
