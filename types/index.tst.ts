@@ -1,41 +1,43 @@
 'use strict'
 
-import { expectType, expectError, expectAssignable } from 'tsd'
-import fastify, { FastifyInstance, RouteShorthandOptions } from 'fastify'
-import fastifySSE, { SSEPluginOptions, SSEMessage, SSESource, SSEReplyInterface } from '..'
+import fastify, { FastifyRequest, FastifyReply, FastifyInstance, RouteShorthandOptions } from 'fastify'
+import fastifySSE, { SSEPluginOptions, SSEMessage, SSESource, SSEReplyInterface } from '.'
 import { Readable } from 'stream'
+import { expect } from 'tstyche'
 
 // Test plugin registration
 const app: FastifyInstance = fastify()
 
 // Test plugin options - app.register returns the app instance
-expectAssignable<FastifyInstance>(app.register(fastifySSE))
-expectAssignable<FastifyInstance>(app.register(fastifySSE, {}))
-expectAssignable<FastifyInstance>(app.register(fastifySSE, {
+expect(app.register(fastifySSE)).type.toBeAssignableTo<FastifyInstance>()
+expect(app.register(fastifySSE, {})).type.toBeAssignableTo<FastifyInstance>()
+expect(app.register(fastifySSE, {
   heartbeatInterval: 10000
-}))
-expectAssignable<FastifyInstance>(app.register(fastifySSE, {
+})).type.toBeAssignableTo<FastifyInstance>()
+expect(app.register(fastifySSE, {
   serializer: (data: any) => JSON.stringify(data)
-}))
-expectAssignable<FastifyInstance>(app.register(fastifySSE, {
+})).type.toBeAssignableTo<FastifyInstance>()
+expect(app.register(fastifySSE, {
   heartbeatInterval: 0,
   serializer: (data: any) => String(data)
-}))
+})).type.toBeAssignableTo<FastifyInstance>()
 
 // Test invalid plugin options
-expectError(app.register(fastifySSE, {
+expect(app.register).type.not.toBeCallableWith(fastifySSE, {
   heartbeatInterval: 'invalid'
-}))
-expectError(app.register(fastifySSE, {
+})
+
+expect(app.register).type.not.toBeCallableWith(fastifySSE, {
   serializer: 123
-}))
-expectError(app.register(fastifySSE, {
+})
+
+expect(app.register).type.not.toBeCallableWith(fastifySSE, {
   unknownOption: true
-}))
+})
 
 // Test route options
 app.get('/sse', { sse: true }, async (request, reply) => {
-  expectType<SSEReplyInterface>(reply.sse)
+  expect(reply.sse).type.toBe<SSEReplyInterface>()
   return reply.sse.send({ data: 'test' })
 })
 
@@ -45,7 +47,7 @@ app.get('/sse-with-options', {
     serializer: (data: any) => JSON.stringify(data)
   }
 }, async (request, reply) => {
-  expectType<SSEReplyInterface>(reply.sse)
+  expect(reply.sse).type.toBe<SSEReplyInterface>()
   return reply.sse.send({ data: 'test' })
 })
 
@@ -61,62 +63,62 @@ const fullMessage: SSEMessage = {
   retry: 5000
 }
 
-expectType<string | undefined>(message.id)
-expectType<string | undefined>(message.event)
-expectType<any>(message.data)
-expectType<number | undefined>(message.retry)
-expectAssignable<SSEMessage>(fullMessage)
+expect(message.id).type.toBe<string | undefined>()
+expect(message.event).type.toBe<string | undefined>()
+expect(message.data).type.toBe<any>()
+expect(message.retry).type.toBe<number | undefined>()
+expect(fullMessage).type.toBeAssignableTo<SSEMessage>()
 
 // Test SSE sources
 const stringSource: SSESource = 'hello'
-expectAssignable<SSESource>(stringSource)
+expect(stringSource).type.toBeAssignableTo<SSESource>()
 
 const bufferSource: SSESource = Buffer.from('hello')
-expectAssignable<SSESource>(bufferSource)
+expect(bufferSource).type.toBeAssignableTo<SSESource>()
 
 const messageSource: SSESource = { data: 'test' }
-expectAssignable<SSESource>(messageSource)
+expect(messageSource).type.toBeAssignableTo<SSESource>()
 
 const streamSource: SSESource = new Readable()
-expectAssignable<SSESource>(streamSource)
+expect(streamSource).type.toBeAssignableTo<SSESource>()
 
 async function * asyncGenerator (): AsyncIterable<SSEMessage> {
   yield { data: 'test' }
 }
 const asyncIterableSource: SSESource = asyncGenerator()
-expectAssignable<SSESource>(asyncIterableSource)
+expect(asyncIterableSource).type.toBeAssignableTo<SSESource>()
 
 // Test SSE reply interface
 app.get('/test-reply', { sse: true }, async (request, reply) => {
   // Test properties
-  expectType<string | null>(reply.sse.lastEventId)
-  expectType<boolean>(reply.sse.isConnected)
+  expect(reply.sse.lastEventId).type.toBe<string | null>()
+  expect(reply.sse.isConnected).type.toBe<boolean>()
 
   // Test send method with different sources
-  expectType<Promise<void>>(reply.sse.send('string'))
-  expectType<Promise<void>>(reply.sse.send(Buffer.from('buffer')))
-  expectType<Promise<void>>(reply.sse.send({ data: 'object' }))
-  expectType<Promise<void>>(reply.sse.send(new Readable()))
-  expectType<Promise<void>>(reply.sse.send(asyncGenerator()))
+  expect(reply.sse.send('string')).type.toBe<Promise<void>>()
+  expect(reply.sse.send(Buffer.from('buffer'))).type.toBe<Promise<void>>()
+  expect(reply.sse.send({ data: 'object' })).type.toBe<Promise<void>>()
+  expect(reply.sse.send(new Readable())).type.toBe<Promise<void>>()
+  expect(reply.sse.send(asyncGenerator())).type.toBe<Promise<void>>()
 
   // Test stream method
-  expectType<NodeJS.WritableStream>(reply.sse.stream())
+  expect(reply.sse.stream()).type.toBe<NodeJS.WritableStream>()
 
   // Test keepAlive method
-  expectType<void>(reply.sse.keepAlive())
+  expect(reply.sse.keepAlive()).type.toBe<void>()
 
   // Test close method
-  expectType<void>(reply.sse.close())
+  expect(reply.sse.close()).type.toBe<void>()
 
   // Test replay method
-  expectType<Promise<void>>(reply.sse.replay(async (lastEventId: string) => {
+  expect(reply.sse.replay(async (lastEventId: string) => {
     console.log(lastEventId)
-  }))
+  })).type.toBe<Promise<void>>()
 
   // Test onClose method
-  expectType<void>(reply.sse.onClose(() => {
+  expect(reply.sse.onClose(() => {
     console.log('closed')
-  }))
+  })).type.toBe<void>()
 })
 
 // Test that reply.sse is available only on sse routes
@@ -138,7 +140,7 @@ const complexMessage: SSEMessage = {
   retry: 10000
 }
 
-expectAssignable<SSESource>(complexMessage)
+expect(complexMessage).type.toBeAssignableTo<SSESource>()
 
 // Test async iterator types
 async function * typedAsyncGenerator (): AsyncIterable<string> {
@@ -151,18 +153,18 @@ async function * mixedAsyncGenerator (): AsyncIterable<SSEMessage | string | Buf
   yield Buffer.from('buffer')
 }
 
-expectAssignable<SSESource>(typedAsyncGenerator())
-expectAssignable<SSESource>(mixedAsyncGenerator())
+expect(typedAsyncGenerator()).type.toBeAssignableTo<SSESource>()
+expect(mixedAsyncGenerator()).type.toBeAssignableTo<SSESource>()
 
 // Test plugin options interface
 const pluginOptions: SSEPluginOptions = {
   heartbeatInterval: 15000,
   serializer: (data) => {
-    expectType<any>(data)
+    expect(data).type.toBe<any>()
     return JSON.stringify(data)
   }
 }
-expectAssignable<SSEPluginOptions>(pluginOptions)
+expect(pluginOptions).type.toBeAssignableTo<SSEPluginOptions>()
 
 // Test serializer function type
 const customSerializer = (data: any): string => {
@@ -171,20 +173,20 @@ const customSerializer = (data: any): string => {
   }
   return String(data)
 }
-expectAssignable<SSEPluginOptions>({
+expect({
   serializer: customSerializer
-})
+}).type.toBeAssignableTo<SSEPluginOptions>()
 
 // Test route options with boolean
 const routeOptions1: RouteShorthandOptions = {
   sse: true
 }
-expectAssignable<RouteShorthandOptions>(routeOptions1)
+expect(routeOptions1).type.toBeAssignableTo<RouteShorthandOptions>()
 
 const routeOptions2: RouteShorthandOptions = {
   sse: false
 }
-expectAssignable<RouteShorthandOptions>(routeOptions2)
+expect(routeOptions2).type.toBeAssignableTo<RouteShorthandOptions>()
 
 const routeOptions3: RouteShorthandOptions = {
   sse: {
@@ -192,15 +194,15 @@ const routeOptions3: RouteShorthandOptions = {
     serializer: (data) => String(data)
   }
 }
-expectAssignable<RouteShorthandOptions>(routeOptions3)
+expect(routeOptions3).type.toBeAssignableTo<RouteShorthandOptions>()
 
 // Test invalid route options - these tests verify type checking
-expectError(app.get('/invalid', {
+expect(app.get).type.not.toBeCallableWith('/invalid', {
   sse: 'invalid'
-}, async (request, reply) => {}))
+}, async (request: FastifyRequest, reply: FastifyReply) => {})
 
-expectError(app.get('/invalid2', {
+expect(app.get).type.not.toBeCallableWith('/invalid2', {
   sse: {
     unknownOption: true
   }
-}, async (request, reply) => {}))
+}, async (request: FastifyRequest, reply: FastifyReply) => { })
