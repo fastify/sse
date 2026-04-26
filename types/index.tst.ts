@@ -1,6 +1,4 @@
-'use strict'
-
-import fastify, { FastifyRequest, FastifyReply, FastifyInstance, RouteShorthandOptions } from 'fastify'
+import fastify, { FastifyInstance, RouteShorthandOptions } from 'fastify'
 import fastifySSE, { SSEPluginOptions, SSEMessage, SSESource, SSEReplyInterface } from '.'
 import { Readable } from 'stream'
 import { expect } from 'tstyche'
@@ -111,8 +109,8 @@ app.get('/test-reply', { sse: true }, async (request, reply) => {
   expect(reply.sse.close()).type.toBe<void>()
 
   // Test replay method
-  expect(reply.sse.replay(async (lastEventId: string) => {
-    console.log(lastEventId)
+  expect(reply.sse.replay(async (lastEventId) => {
+    expect(lastEventId).type.toBe<string>()
   })).type.toBe<Promise<void>>()
 
   // Test onClose method
@@ -197,12 +195,13 @@ const routeOptions3: RouteShorthandOptions = {
 expect(routeOptions3).type.toBeAssignableTo<RouteShorthandOptions>()
 
 // Test invalid route options - these tests verify type checking
-expect(app.get).type.not.toBeCallableWith('/invalid', {
+app.get('/invalid', {
+  // @ts-expect-error Type 'string' is not assignable
   sse: 'invalid'
-}, async (request: FastifyRequest, reply: FastifyReply) => {})
-
-expect(app.get).type.not.toBeCallableWith('/invalid2', {
+}, async (request, reply) => { })
+app.get('/invalid2', {
   sse: {
+    // @ts-expect-error 'unknownOption' does not exist in type
     unknownOption: true
   }
-}, async (request: FastifyRequest, reply: FastifyReply) => { })
+}, async (request, reply) => { })
