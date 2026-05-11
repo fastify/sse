@@ -27,8 +27,8 @@ export type SSERouteKind = 'only' | 'dual'
  *
  * Accepted values:
  * - `true` — Back-compat. Routes like `'dual'` for gate behavior; on the
- *   fallback path the plugin rethrows with a clearer error if the handler
- *   tries to use `reply.sse` (signals "use `'only'` instead").
+ *   fallback path the plugin rethrows with a message naming `'only'` as
+ *   the fix if the handler tries to use `reply.sse`.
  * - `'only'` / `'dual'` — Shorthand for the matching kind.
  * - Object form — Same kinds via `kind`, plus per-route option overrides.
  *   `kind` omitted = back-compat behavior, equivalent to `sse: true`.

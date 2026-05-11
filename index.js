@@ -526,10 +526,11 @@ async function fastifySSE (fastify, opts) {
       //             Strict gate: only an explicit `text/event-stream` token
       //             admits SSE; everything else falls through to the
       //             handler, which is expected to serve a non-SSE response.
-      //   'legacy' — `sse: true` back-compat. Same routing as 'dual', plus
-      //              a clearer error if the fallback handler tries to use
-      //              `reply.sse` (signals "you wanted SSE-only — use
-      //              `sse: 'only'`").
+      //   'legacy' — `sse: true` back-compat. Same routing as 'dual'. If
+      //              the fallback handler then tries to use `reply.sse`
+      //              (which is undefined because the gate refused), the
+      //              plugin rethrows with a message that names
+      //              `sse: 'only'` as the likely fix.
       if (kind === 'only') {
         if (!clientAcceptsSSE(acceptHeader)) {
           return reply.code(406).type('application/json').send({

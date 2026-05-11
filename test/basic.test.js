@@ -463,7 +463,7 @@ test("sse: 'dual' routes only explicit text/event-stream to SSE", async (t) => {
 })
 
 // -----------------------------------------------------------------------
-// sse: true (legacy back-compat + clearer error on misuse)
+// sse: true (legacy back-compat + explanatory error on misuse)
 // -----------------------------------------------------------------------
 
 test("sse: true behaves like 'dual' for routing (back-compat)", async (t) => {
@@ -497,7 +497,7 @@ test("sse: true behaves like 'dual' for routing (back-compat)", async (t) => {
   assert.strictEqual(explicit.headers['content-type'], 'text/event-stream')
 })
 
-test('sse: true with SSE-only handler gives a clearer error on misuse', async (t) => {
+test('sse: true with SSE-only handler emits an explanatory error on misuse', async (t) => {
   const fastify = Fastify({ logger: false })
   t.after(async () => { await fastify.close() })
   await fastify.register(fastifySSE)

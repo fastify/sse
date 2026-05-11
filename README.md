@@ -80,8 +80,8 @@ fastify.get('/data', { sse: 'dual' }, handler)
 
 // Back-compat: `sse: true` behaves like `'dual'` for routing. If the
 // handler is actually SSE-only and trips a TypeError on `reply.sse`
-// because of a wildcard Accept, the plugin rethrows with a clearer error
-// nudging you toward `sse: 'only'`.
+// because of a wildcard Accept, the plugin rethrows with a message
+// that names `sse: 'only'` as the fix.
 fastify.get('/legacy', { sse: true }, handler)
 
 // Object form (supports per-route options):
@@ -275,7 +275,7 @@ route's declared kind:
 | `sse: 'dual'`  | `text/event-stream`        | SSE branch              |
 | `sse: 'dual'`  | `*/*`, `text/*`, missing   | Non-SSE branch          |
 | `sse: 'dual'`  | `application/json`         | Non-SSE branch          |
-| `sse: true`    | (same routing as `'dual'`) | + clearer error on misuse |
+| `sse: true`    | (same routing as `'dual'`) | + explanatory error on misuse |
 
 In short: explicit `text/event-stream` always routes to SSE; ambiguous
 wildcards route to SSE only when you've declared the route SSE-only.
