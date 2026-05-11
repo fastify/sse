@@ -5,7 +5,6 @@ const { strict: assert } = require('node:assert')
 const Fastify = require('fastify')
 const { Readable } = require('stream')
 const fastifySSE = require('../index.js')
-const { clientAcceptsSSE } = require('../index.js')
 
 test('basic SSE functionality', async (t) => {
   const fastify = Fastify({ logger: false })
@@ -293,71 +292,6 @@ test('reply.sse.stream() for pipeline operations', async (t) => {
   assert.ok(body.includes('data: "second"'))
   assert.ok(body.includes('id: 3'))
   assert.ok(body.includes('data: "third"'))
-})
-
-test('clientAcceptsSSE: missing Accept admits SSE', () => {
-  assert.strictEqual(clientAcceptsSSE(undefined), true)
-  assert.strictEqual(clientAcceptsSSE(''), true)
-})
-
-test('clientAcceptsSSE: */* admits SSE', () => {
-  assert.strictEqual(clientAcceptsSSE('*/*'), true)
-  assert.strictEqual(clientAcceptsSSE('application/json, */*'), true)
-})
-
-test('clientAcceptsSSE: text/* admits SSE', () => {
-  assert.strictEqual(clientAcceptsSSE('text/*'), true)
-})
-
-test('clientAcceptsSSE: explicit text/event-stream admits SSE', () => {
-  assert.strictEqual(clientAcceptsSSE('text/event-stream'), true)
-  assert.strictEqual(clientAcceptsSSE('text/event-stream;charset=utf-8'), true)
-})
-
-test('clientAcceptsSSE: explicit non-matching types do not admit SSE', () => {
-  assert.strictEqual(clientAcceptsSSE('application/json'), false)
-  assert.strictEqual(clientAcceptsSSE('text/html, text/plain'), false)
-})
-
-test('clientAcceptsSSE: q=0 on most specific match overrides wildcards', () => {
-  // RFC 9110: the most specific match wins. text/event-stream;q=0 explicitly
-  // rejects SSE even though */* would otherwise admit it.
-  assert.strictEqual(clientAcceptsSSE('*/*, text/event-stream;q=0'), false)
-  assert.strictEqual(clientAcceptsSSE('text/*, text/event-stream;q=0'), false)
-})
-
-test('clientAcceptsSSE: q=0 on wildcard does not block explicit match', () => {
-  assert.strictEqual(clientAcceptsSSE('*/*;q=0, text/event-stream'), true)
-})
-
-test('clientAcceptsSSE: q-values are parsed but do not affect admission past 0', () => {
-  assert.strictEqual(clientAcceptsSSE('text/event-stream;q=0.1'), true)
-  assert.strictEqual(clientAcceptsSSE('application/json;q=0.9, */*;q=0.1'), true)
-})
-
-test('clientAcceptsSSE: out-of-range q-values are ignored (default q=1)', () => {
-  // q=2 / q=-1 / q=abc are invalid per RFC 9110; entry falls back to q=1
-  // and still admits SSE.
-  assert.strictEqual(clientAcceptsSSE('text/event-stream;q=2'), true)
-  assert.strictEqual(clientAcceptsSSE('text/event-stream;q=-1'), true)
-  assert.strictEqual(clientAcceptsSSE('text/event-stream;q=abc'), true)
-  // Invalid q on the most specific match doesn't unblock SSE if a valid
-  // qvalue elsewhere makes the entry inadmissible. Here q=2 is invalid →
-  // defaults to 1 → still admits.
-  assert.strictEqual(clientAcceptsSSE('*/*;q=2'), true)
-})
-
-test('clientAcceptsSSE: strict mode only admits explicit text/event-stream', () => {
-  const strict = { strict: true }
-  assert.strictEqual(clientAcceptsSSE(undefined, strict), false)
-  assert.strictEqual(clientAcceptsSSE('', strict), false)
-  assert.strictEqual(clientAcceptsSSE('*/*', strict), false)
-  assert.strictEqual(clientAcceptsSSE('text/*', strict), false)
-  assert.strictEqual(clientAcceptsSSE('application/json', strict), false)
-  assert.strictEqual(clientAcceptsSSE('text/event-stream', strict), true)
-  assert.strictEqual(clientAcceptsSSE('application/json, text/event-stream', strict), true)
-  assert.strictEqual(clientAcceptsSSE('text/event-stream;q=0', strict), false)
-  assert.strictEqual(clientAcceptsSSE('text/event-stream;q=0.5', strict), true)
 })
 
 // -----------------------------------------------------------------------

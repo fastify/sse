@@ -602,4 +602,3 @@ module.exports = fp(fastifySSE, {
 })
 module.exports.default = fastifySSE
 module.exports.fastifySSE = fastifySSE
-module.exports.clientAcceptsSSE = clientAcceptsSSE

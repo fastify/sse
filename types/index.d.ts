@@ -141,22 +141,4 @@ export interface SSEReplyInterface {
 
 export declare const fastifySSE: FastifyPluginAsync<SSEPluginOptions>
 
-/**
- * Determine whether the client's Accept header admits `text/event-stream`,
- * implementing the RFC 9110 §12.5.1 precedence model for the media ranges
- * relevant to SSE (`text/event-stream`, `text/*`, `*\/*`).
- *
- * Default (lenient) returns true when the header is missing, empty, or
- * admits SSE via a matching range with quality > 0. The most specific
- * matching range wins, so `*\/*, text/event-stream;q=0` returns false.
- *
- * Pass `{ strict: true }` to require an explicit `text/event-stream` token
- * with quality > 0; ambiguous headers (`*\/*`, `text/*`, missing) return
- * false in strict mode.
- */
-export declare function clientAcceptsSSE (
-  acceptHeader: string | undefined,
-  options?: { strict?: boolean }
-): boolean
-
 export default fastifySSE

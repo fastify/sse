@@ -311,17 +311,6 @@ etc.) are not committed until the first `reply.sse.send()` /
 then returns a plain value falls through to Fastify's normal
 serialization path without corrupting the response.
 
-### Helper: `clientAcceptsSSE`
-
-Use the exported helper if you need to make the same decision elsewhere:
-
-```js
-const { clientAcceptsSSE } = require('@fastify/sse')
-clientAcceptsSSE('*/*')                                  // true
-clientAcceptsSSE('application/json')                     // false
-clientAcceptsSSE('*/*', { strict: true })                // false
-clientAcceptsSSE('text/event-stream', { strict: true })  // true
-```
 
 ### Error Handling
 
