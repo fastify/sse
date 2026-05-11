@@ -7,17 +7,36 @@ declare module 'fastify' {
   }
 
   interface RouteShorthandOptions {
-    sse?: boolean | {
-      heartbeat?: boolean
-      serializer?: (data: any) => string
-      /**
-       * Require an explicit `text/event-stream` token in the Accept header
-       * for this route. Overrides the plugin-level `strictAccept` setting.
-       * @default false
-       */
-      strictAccept?: boolean
-    }
+    sse?: SSERouteOptions
   }
+}
+
+/**
+ * Declares how a route handles the SSE/non-SSE split.
+ *
+ * - `'only'` — SSE-only. Lenient gate: any spec-compliant Accept admits
+ *   SSE. Clients that explicitly refuse SSE receive 406 Not Acceptable.
+ * - `'dual'` — Route serves both SSE and non-SSE on the same handler.
+ *   Strict gate: only an explicit `text/event-stream` token admits SSE;
+ *   the handler must branch on `reply.sse` to serve other clients.
+ */
+export type SSERouteKind = 'only' | 'dual'
+
+/**
+ * Per-route SSE options.
+ *
+ * Accepted values:
+ * - `true` — Back-compat. Routes like `'dual'` for gate behavior; on the
+ *   fallback path the plugin rethrows with a clearer error if the handler
+ *   tries to use `reply.sse` (signals "use `'only'` instead").
+ * - `'only'` / `'dual'` — Shorthand for the matching kind.
+ * - Object form — Same kinds via `kind`, plus per-route option overrides.
+ *   `kind` omitted = back-compat behavior, equivalent to `sse: true`.
+ */
+export type SSERouteOptions = boolean | SSERouteKind | {
+  kind?: SSERouteKind
+  heartbeat?: boolean
+  serializer?: (data: any) => string
 }
 
 export interface SSEPluginOptions {
@@ -33,15 +52,6 @@ export interface SSEPluginOptions {
    * @default JSON.stringify
    */
   serializer?: (data: any) => string
-
-  /**
-   * Require an explicit `text/event-stream` token in the Accept header to
-   * serve SSE. When false (default), the plugin follows RFC 9110 §12.5.1 and
-   * admits SSE for `*\/*`, `text/*`, and missing Accept headers. When true,
-   * those ambiguous headers fall through to the regular handler.
-   * @default false
-   */
-  strictAccept?: boolean
 }
 
 export interface SSEMessage {

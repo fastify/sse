@@ -347,81 +347,6 @@ test('clientAcceptsSSE: out-of-range q-values are ignored (default q=1)', () => 
   assert.strictEqual(clientAcceptsSSE('*/*;q=2'), true)
 })
 
-test('SSE is served when client sends Accept: */*', async (t) => {
-  const fastify = Fastify({ logger: false })
-
-  t.after(async () => {
-    await fastify.close()
-  })
-
-  await fastify.register(fastifySSE)
-
-  fastify.get('/events', { sse: true }, async (request, reply) => {
-    await reply.sse.send({ data: 'hello' })
-  })
-
-  const response = await fastify.inject({
-    method: 'GET',
-    url: '/events',
-    headers: {
-      accept: '*/*'
-    }
-  })
-
-  assert.strictEqual(response.statusCode, 200)
-  assert.strictEqual(response.headers['content-type'], 'text/event-stream')
-  assert.ok(response.body.includes('data: "hello"'))
-})
-
-test('SSE is served when client omits the Accept header', async (t) => {
-  const fastify = Fastify({ logger: false })
-
-  t.after(async () => {
-    await fastify.close()
-  })
-
-  await fastify.register(fastifySSE)
-
-  fastify.get('/events', { sse: true }, async (request, reply) => {
-    await reply.sse.send({ data: 'hello' })
-  })
-
-  const response = await fastify.inject({
-    method: 'GET',
-    url: '/events'
-    // no Accept header
-  })
-
-  assert.strictEqual(response.statusCode, 200)
-  assert.strictEqual(response.headers['content-type'], 'text/event-stream')
-  assert.ok(response.body.includes('data: "hello"'))
-})
-
-test('SSE is served when client sends Accept: text/*', async (t) => {
-  const fastify = Fastify({ logger: false })
-
-  t.after(async () => {
-    await fastify.close()
-  })
-
-  await fastify.register(fastifySSE)
-
-  fastify.get('/events', { sse: true }, async (request, reply) => {
-    await reply.sse.send({ data: 'hello' })
-  })
-
-  const response = await fastify.inject({
-    method: 'GET',
-    url: '/events',
-    headers: {
-      accept: 'text/*'
-    }
-  })
-
-  assert.strictEqual(response.statusCode, 200)
-  assert.strictEqual(response.headers['content-type'], 'text/event-stream')
-})
-
 test('clientAcceptsSSE: strict mode only admits explicit text/event-stream', () => {
   const strict = { strict: true }
   assert.strictEqual(clientAcceptsSSE(undefined, strict), false)
@@ -435,16 +360,136 @@ test('clientAcceptsSSE: strict mode only admits explicit text/event-stream', () 
   assert.strictEqual(clientAcceptsSSE('text/event-stream;q=0.5', strict), true)
 })
 
-test('plugin-level strictAccept opts out of the SSE-wins default', async (t) => {
-  const fastify = Fastify({ logger: false })
+// -----------------------------------------------------------------------
+// sse: 'only' (SSE-only routes)
+// -----------------------------------------------------------------------
 
-  t.after(async () => {
-    await fastify.close()
+test("sse: 'only' admits SSE for */*", async (t) => {
+  const fastify = Fastify({ logger: false })
+  t.after(async () => { await fastify.close() })
+  await fastify.register(fastifySSE)
+
+  fastify.get('/events', { sse: 'only' }, async (request, reply) => {
+    await reply.sse.send({ data: 'hello' })
   })
 
-  await fastify.register(fastifySSE, { strictAccept: true })
+  const response = await fastify.inject({
+    method: 'GET',
+    url: '/events',
+    headers: { accept: '*/*' }
+  })
+  assert.strictEqual(response.statusCode, 200)
+  assert.strictEqual(response.headers['content-type'], 'text/event-stream')
+  assert.ok(response.body.includes('data: "hello"'))
+})
 
-  fastify.get('/data', { sse: true }, async (request, reply) => {
+test("sse: 'only' admits SSE for missing Accept", async (t) => {
+  const fastify = Fastify({ logger: false })
+  t.after(async () => { await fastify.close() })
+  await fastify.register(fastifySSE)
+
+  fastify.get('/events', { sse: 'only' }, async (request, reply) => {
+    await reply.sse.send({ data: 'hello' })
+  })
+
+  const response = await fastify.inject({ method: 'GET', url: '/events' })
+  assert.strictEqual(response.statusCode, 200)
+  assert.strictEqual(response.headers['content-type'], 'text/event-stream')
+  assert.ok(response.body.includes('data: "hello"'))
+})
+
+test("sse: 'only' admits SSE for text/*", async (t) => {
+  const fastify = Fastify({ logger: false })
+  t.after(async () => { await fastify.close() })
+  await fastify.register(fastifySSE)
+
+  fastify.get('/events', { sse: 'only' }, async (request, reply) => {
+    await reply.sse.send({ data: 'hello' })
+  })
+
+  const response = await fastify.inject({
+    method: 'GET',
+    url: '/events',
+    headers: { accept: 'text/*' }
+  })
+  assert.strictEqual(response.headers['content-type'], 'text/event-stream')
+})
+
+test("sse: 'only' returns 406 when client explicitly refuses SSE", async (t) => {
+  const fastify = Fastify({ logger: false })
+  t.after(async () => { await fastify.close() })
+  await fastify.register(fastifySSE)
+
+  fastify.get('/events', { sse: 'only' }, async (request, reply) => {
+    await reply.sse.send({ data: 'hello' })
+  })
+
+  const response = await fastify.inject({
+    method: 'GET',
+    url: '/events',
+    headers: { accept: 'application/json' }
+  })
+  assert.strictEqual(response.statusCode, 406)
+  assert.strictEqual(response.headers['content-type'], 'application/json; charset=utf-8')
+  const body = JSON.parse(response.body)
+  assert.strictEqual(body.statusCode, 406)
+  assert.strictEqual(body.error, 'Not Acceptable')
+  assert.match(body.message, /text\/event-stream/)
+})
+
+test("sse: 'only' returns 406 when client sends text/event-stream;q=0", async (t) => {
+  const fastify = Fastify({ logger: false })
+  t.after(async () => { await fastify.close() })
+  await fastify.register(fastifySSE)
+
+  fastify.get('/events', { sse: 'only' }, async (request, reply) => {
+    await reply.sse.send({ data: 'hello' })
+  })
+
+  const response = await fastify.inject({
+    method: 'GET',
+    url: '/events',
+    headers: { accept: '*/*, text/event-stream;q=0' }
+  })
+  assert.strictEqual(response.statusCode, 406)
+})
+
+test("sse: { kind: 'only', heartbeat: false } object form is supported", async (t) => {
+  const fastify = Fastify({ logger: false })
+  t.after(async () => { await fastify.close() })
+  await fastify.register(fastifySSE)
+
+  fastify.get('/events', {
+    sse: { kind: 'only', heartbeat: false }
+  }, async (request, reply) => {
+    await reply.sse.send({ data: 'hello' })
+  })
+
+  const wildcard = await fastify.inject({
+    method: 'GET',
+    url: '/events',
+    headers: { accept: '*/*' }
+  })
+  assert.strictEqual(wildcard.headers['content-type'], 'text/event-stream')
+
+  const refused = await fastify.inject({
+    method: 'GET',
+    url: '/events',
+    headers: { accept: 'application/json' }
+  })
+  assert.strictEqual(refused.statusCode, 406)
+})
+
+// -----------------------------------------------------------------------
+// sse: 'dual' (explicit dual-mode routes)
+// -----------------------------------------------------------------------
+
+test("sse: 'dual' routes only explicit text/event-stream to SSE", async (t) => {
+  const fastify = Fastify({ logger: false })
+  t.after(async () => { await fastify.close() })
+  await fastify.register(fastifySSE)
+
+  fastify.get('/data', { sse: 'dual' }, async (request, reply) => {
     if (reply.sse) {
       await reply.sse.send({ data: 'streamed' })
     } else {
@@ -452,7 +497,7 @@ test('plugin-level strictAccept opts out of the SSE-wins default', async (t) => 
     }
   })
 
-  // */* now falls back because strictAccept refuses ambiguous headers
+  // */* → falls through to JSON
   const wildcard = await fastify.inject({
     method: 'GET',
     url: '/data',
@@ -461,7 +506,19 @@ test('plugin-level strictAccept opts out of the SSE-wins default', async (t) => 
   assert.strictEqual(wildcard.headers['content-type'], 'application/json; charset=utf-8')
   assert.deepStrictEqual(JSON.parse(wildcard.body), { message: 'json' })
 
-  // Explicit text/event-stream still gets SSE
+  // missing → JSON
+  const missing = await fastify.inject({ method: 'GET', url: '/data' })
+  assert.deepStrictEqual(JSON.parse(missing.body), { message: 'json' })
+
+  // application/json → JSON
+  const jsonResponse = await fastify.inject({
+    method: 'GET',
+    url: '/data',
+    headers: { accept: 'application/json' }
+  })
+  assert.deepStrictEqual(JSON.parse(jsonResponse.body), { message: 'json' })
+
+  // text/event-stream → SSE
   const explicit = await fastify.inject({
     method: 'GET',
     url: '/data',
@@ -471,80 +528,98 @@ test('plugin-level strictAccept opts out of the SSE-wins default', async (t) => 
   assert.ok(explicit.body.includes('data: "streamed"'))
 })
 
-test('route-level strictAccept overrides plugin-level setting', async (t) => {
+// -----------------------------------------------------------------------
+// sse: true (legacy back-compat + clearer error on misuse)
+// -----------------------------------------------------------------------
+
+test("sse: true behaves like 'dual' for routing (back-compat)", async (t) => {
   const fastify = Fastify({ logger: false })
-
-  t.after(async () => {
-    await fastify.close()
-  })
-
-  // Plugin default: lenient
-  await fastify.register(fastifySSE)
-
-  // Per-route override: strict
-  fastify.get('/strict', {
-    sse: { strictAccept: true }
-  }, async (request, reply) => {
-    if (reply.sse) {
-      await reply.sse.send({ data: 'streamed' })
-    } else {
-      return { message: 'json' }
-    }
-  })
-
-  // Default route uses plugin default (admits SSE for */*)
-  fastify.get('/default', { sse: true }, async (request, reply) => {
-    await reply.sse.send({ data: 'streamed' })
-  })
-
-  const strictWildcard = await fastify.inject({
-    method: 'GET',
-    url: '/strict',
-    headers: { accept: '*/*' }
-  })
-  assert.strictEqual(strictWildcard.headers['content-type'], 'application/json; charset=utf-8')
-
-  const defaultWildcard = await fastify.inject({
-    method: 'GET',
-    url: '/default',
-    headers: { accept: '*/*' }
-  })
-  assert.strictEqual(defaultWildcard.headers['content-type'], 'text/event-stream')
-})
-
-test('handler can gate fallback on reply.sse presence', async (t) => {
-  const fastify = Fastify({ logger: false })
-
-  t.after(async () => {
-    await fastify.close()
-  })
-
+  t.after(async () => { await fastify.close() })
   await fastify.register(fastifySSE)
 
   fastify.get('/data', { sse: true }, async (request, reply) => {
-    if (reply.sse) {
+    const acceptHeader = request.headers.accept || ''
+    if (acceptHeader.includes('text/event-stream')) {
       await reply.sse.send({ data: 'streamed' })
     } else {
       return { message: 'json' }
     }
   })
 
-  // */* → plugin admits SSE → handler sees reply.sse and streams
-  const sseResponse = await fastify.inject({
+  // */* → falls through (strict gate); handler returns JSON
+  const wildcard = await fastify.inject({
     method: 'GET',
     url: '/data',
     headers: { accept: '*/*' }
   })
-  assert.strictEqual(sseResponse.headers['content-type'], 'text/event-stream')
-  assert.ok(sseResponse.body.includes('data: "streamed"'))
+  assert.deepStrictEqual(JSON.parse(wildcard.body), { message: 'json' })
 
-  // application/json → plugin falls back → handler returns JSON
-  const jsonResponse = await fastify.inject({
+  // text/event-stream → SSE
+  const explicit = await fastify.inject({
     method: 'GET',
     url: '/data',
-    headers: { accept: 'application/json' }
+    headers: { accept: 'text/event-stream' }
   })
-  assert.strictEqual(jsonResponse.statusCode, 200)
-  assert.strictEqual(jsonResponse.headers['content-type'], 'application/json; charset=utf-8')
-  assert.deepStrictEqual(JSON.parse(jsonResponse.body), { message: 'json' })
+  assert.strictEqual(explicit.headers['content-type'], 'text/event-stream')
+})
+
+test('sse: true with SSE-only handler gives a clearer error on misuse', async (t) => {
+  const fastify = Fastify({ logger: false })
+  t.after(async () => { await fastify.close() })
+  await fastify.register(fastifySSE)
+
+  // Handler is SSE-only — calls reply.sse.send unconditionally — but
+  // registered with the legacy `sse: true` flag. When a wildcard Accept
+  // arrives, the strict gate falls through, reply.sse is undefined, and the
+  // handler trips the TypeError. The plugin should rethrow with guidance to
+  // switch to `sse: 'only'`.
+  fastify.get('/events', { sse: true }, async (request, reply) => {
+    await reply.sse.send({ data: 'hello' })
+  })
+
+  const response = await fastify.inject({
+    method: 'GET',
+    url: '/events',
+    headers: { accept: '*/*' }
+  })
+
+  // The rethrown error reaches Fastify's default error handler.
+  assert.strictEqual(response.statusCode, 500)
+  assert.match(response.body, /sse: 'only'/)
+})
+
+test('sse: true with object form (no kind) is treated as legacy', async (t) => {
+  const fastify = Fastify({ logger: false })
+  t.after(async () => { await fastify.close() })
+  await fastify.register(fastifySSE)
+
+  // No `kind` field — back-compat with existing `{ heartbeat, serializer }` users.
+  fastify.get('/events', {
+    sse: { heartbeat: false }
+  }, async (request, reply) => {
+    const acceptHeader = request.headers.accept || ''
+    if (acceptHeader.includes('text/event-stream')) {
+      await reply.sse.send({ data: 'streamed' })
+    } else {
+      return { message: 'json' }
+    }
+  })
+
+  const wildcard = await fastify.inject({
+    method: 'GET',
+    url: '/events',
+    headers: { accept: '*/*' }
+  })
+  assert.deepStrictEqual(JSON.parse(wildcard.body), { message: 'json' })
+})
+
+test('unknown sse kind throws at registration', async (t) => {
+  const fastify = Fastify({ logger: false })
+  t.after(async () => { await fastify.close() })
+  await fastify.register(fastifySSE)
+
+  assert.throws(
+    () => fastify.get('/events', { sse: { kind: 'maybe' } }, async () => {}),
+    /unknown sse kind 'maybe'/
+  )
 })

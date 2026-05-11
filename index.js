@@ -5,6 +5,103 @@ const { Readable, Transform } = require('stream')
 const { pipeline } = require('stream/promises')
 
 /**
+ * Determine whether the client's Accept header admits `text/event-stream`.
+ *
+ * Implements the RFC 9110 §12.5.1 precedence model for the media ranges that
+ * are relevant to SSE — `text/event-stream`, `text/*`, and `*\/*`. Other
+ * media-type parameters are ignored; only the `q` parameter is honored.
+ *
+ * Default (lenient) returns true when the header is missing, empty, or
+ * contains a matching range with quality > 0. The most specific matching
+ * range wins, so `*\/*, text/event-stream;q=0` correctly returns false.
+ *
+ * Pass `{ strict: true }` to require an explicit `text/event-stream` token
+ * with quality > 0; ambiguous headers (`*\/*`, `text/*`, missing) return
+ * false in strict mode.
+ *
+ * Quality values outside [0, 1] are ignored and the entry's quality defaults
+ * to 1 (the spec default when no qvalue is present).
+ *
+ * @param {string|undefined} acceptHeader
+ * @param {{ strict?: boolean }} [options]
+ * @returns {boolean}
+ */
+function clientAcceptsSSE (acceptHeader, options) {
+  const strict = options?.strict === true
+  if (!acceptHeader) return !strict
+
+  let bestSpecificity = -1
+  let bestQuality = 0
+
+  for (const part of acceptHeader.split(',')) {
+    const [rawType, ...params] = part.split(';')
+    const type = rawType.trim().toLowerCase()
+
+    let specificity
+    if (type === 'text/event-stream') specificity = 3
+    else if (!strict && type === 'text/*') specificity = 2
+    else if (!strict && type === '*/*') specificity = 1
+    else continue
+
+    let quality = 1
+    for (const p of params) {
+      const eq = p.indexOf('=')
+      if (eq === -1) continue
+      const key = p.slice(0, eq).trim().toLowerCase()
+      if (key !== 'q') continue
+      const parsed = Number.parseFloat(p.slice(eq + 1).trim())
+      if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) {
+        quality = parsed
+      }
+    }
+
+    if (specificity > bestSpecificity) {
+      bestSpecificity = specificity
+      bestQuality = quality
+    }
+  }
+
+  return bestSpecificity >= 0 && bestQuality > 0
+}
+
+/**
+ * Resolve the `sse` field on route options into a normalized shape.
+ *
+ *   - `sse: true`     → kind 'legacy' (back-compat, strict gate + clearer
+ *                       error if the handler tries to use reply.sse on the
+ *                       fallback path)
+ *   - `sse: 'dual'`   → kind 'dual'  (explicit dual-mode: strict gate, the
+ *                       handler is expected to serve a non-SSE response when
+ *                       reply.sse is undefined)
+ *   - `sse: 'only'`   → kind 'only'  (SSE-only: lenient gate, returns 406
+ *                       Not Acceptable to clients that explicitly refuse SSE)
+ *   - `sse: { ... }`  → object form; same kinds via `kind: 'dual' | 'only'`,
+ *                       or `kind` omitted = 'legacy' for back-compat with
+ *                       existing `{ heartbeat, serializer, ... }` shapes
+ */
+function resolveSSEConfig (sseField) {
+  if (sseField === true) return { kind: 'legacy', options: {} }
+  if (sseField === 'dual') return { kind: 'dual', options: {} }
+  if (sseField === 'only') return { kind: 'only', options: {} }
+  if (typeof sseField === 'object' && sseField !== null) {
+    const kind = sseField.kind ?? 'legacy'
+    if (kind !== 'legacy' && kind !== 'dual' && kind !== 'only') {
+      throw new Error(
+        `@fastify/sse: unknown sse kind '${kind}'. Use 'only' (SSE-only route), ` +
+        '\'dual\' (route serves both SSE and non-SSE), or omit for back-compat.'
+      )
+    }
+    return { kind, options: sseField }
+  }
+  throw new Error(
+    `@fastify/sse: unsupported value for route option 'sse': ${JSON.stringify(sseField)}. ` +
+    'Use true, \'dual\', \'only\', or an options object.'
+  )
+}
+
+const MISSING_SSE_ERROR_PATTERN = /Cannot read prop(?:erties)? of undefined.*'(?:send|stream|keepAlive|close|sendHeaders|replay|onClose)'/
+
+/**
  * Format an SSE message according to the specification
  * @param {Object|string|Buffer} message - The message to format
  * @param {Function} serializer - Function to serialize data
@@ -152,13 +249,19 @@ class SSEContext {
   /**
    * Closes the SSE connection and performs cleanup.
    * Safe to call multiple times.
+   *
+   * If no SSE data was ever written (i.e., headers were never committed as
+   * SSE), the raw response is left open so Fastify can serialize the
+   * handler's return value normally.
    */
   close () {
     if (!this.#isConnected) return
 
     this.#isConnected = false
     this.cleanup()
-    this.reply.raw.end()
+    if (this.#headersSent) {
+      this.reply.raw.end()
+    }
   }
 
   /**
@@ -182,14 +285,22 @@ class SSEContext {
 
   /**
    * Sends HTTP headers for the SSE response if not already sent.
-   * This method ensures headers set via reply.header() are transferred
-   * to the raw response before calling writeHead(200).
-   * Called automatically before the first SSE data is sent, but can
-   * also be called manually if needed.
+   * Applies the SSE-specific response headers, transfers any headers set
+   * via reply.header(), and calls writeHead(200). Called automatically
+   * before the first SSE data is sent, but can also be called manually.
+   *
+   * Until this fires, the response is not yet committed as SSE — a handler
+   * that never writes SSE data will return through Fastify's normal
+   * serialization path.
    */
   sendHeaders () {
     if (!this.#headersSent) {
-      // Get any headers set via reply.header() and transfer to raw response
+      this.reply.raw.setHeader('Content-Type', 'text/event-stream')
+      this.reply.raw.setHeader('Cache-Control', 'no-cache')
+      this.reply.raw.setHeader('Connection', 'keep-alive')
+      this.reply.raw.setHeader('X-Accel-Buffering', 'no') // Disable Nginx buffering
+
+      // Transfer headers set via reply.header() to the raw response
       const replyHeaders = this.reply.getHeaders()
       for (const [name, value] of Object.entries(replyHeaders)) {
         this.reply.raw.setHeader(name, value)
@@ -392,105 +503,70 @@ class SSEContext {
   }
 }
 
-/**
- * Determine whether the client's Accept header admits `text/event-stream`.
- *
- * Implements the RFC 9110 §12.5.1 precedence model for the media ranges that
- * are relevant to SSE — `text/event-stream`, `text/*`, and `*\/*`. Other
- * media-type parameters are ignored; only the `q` parameter is honored.
- *
- * Default (lenient) behavior returns true when:
- *   - Accept is missing or empty (any media type is acceptable),
- *   - `text/event-stream`, `text/*`, or `*\/*` appears with a quality > 0
- *     and is the most specific match present in the header.
- *
- * Pass `{ strict: true }` to require an explicit `text/event-stream` token
- * with quality > 0; ambiguous headers (`*\/*`, `text/*`, missing) return
- * false in strict mode.
- *
- * The most specific matching range wins (exact > subtype wildcard > full
- * wildcard), so `*\/*, text/event-stream;q=0` correctly returns false.
- *
- * Quality values outside [0, 1] are ignored and the entry's quality defaults
- * to 1 (the spec default when no qvalue is present).
- *
- * @param {string|undefined} acceptHeader
- * @param {{ strict?: boolean }} [options]
- * @returns {boolean}
- */
-function clientAcceptsSSE (acceptHeader, options) {
-  const strict = options?.strict === true
-  if (!acceptHeader) return !strict
-
-  let bestSpecificity = -1
-  let bestQuality = 0
-
-  for (const part of acceptHeader.split(',')) {
-    const [rawType, ...params] = part.split(';')
-    const type = rawType.trim().toLowerCase()
-
-    let specificity
-    if (type === 'text/event-stream') specificity = 3
-    else if (!strict && type === 'text/*') specificity = 2
-    else if (!strict && type === '*/*') specificity = 1
-    else continue
-
-    let quality = 1
-    for (const p of params) {
-      const eq = p.indexOf('=')
-      if (eq === -1) continue
-      const key = p.slice(0, eq).trim().toLowerCase()
-      if (key !== 'q') continue
-      const parsed = Number.parseFloat(p.slice(eq + 1).trim())
-      // Per RFC 9110, qvalue is in [0, 1]; anything else is invalid and
-      // ignored (the entry's quality stays at the default of 1).
-      if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) {
-        quality = parsed
-      }
-    }
-
-    if (specificity > bestSpecificity) {
-      bestSpecificity = specificity
-      bestQuality = quality
-    }
-  }
-
-  return bestSpecificity >= 0 && bestQuality > 0
-}
-
 async function fastifySSE (fastify, opts) {
   const {
     heartbeatInterval = 30000,
-    serializer = JSON.stringify,
-    strictAccept: pluginStrictAccept = false
+    serializer = JSON.stringify
   } = opts
 
   // Add route-level SSE handler
   fastify.addHook('onRoute', (routeOptions) => {
     if (!routeOptions.sse) return
 
+    const { kind, options: sseOptions } = resolveSSEConfig(routeOptions.sse)
     const originalHandler = routeOptions.handler
-    const sseOptions = typeof routeOptions.sse === 'object' ? routeOptions.sse : {}
-    const strictAccept = sseOptions.strictAccept ?? pluginStrictAccept
 
     routeOptions.handler = async function sseHandler (request, reply) {
-      // Decide whether to handle this request as SSE.
-      //   - Default (strictAccept: false): spec-compliant per RFC 9110 —
-      //     admit SSE for `text/event-stream`, `text/*`, `*\/*`, and missing
-      //     Accept.
-      //   - strictAccept: true — require an explicit `text/event-stream`
-      //     token; ambiguous headers (`*\/*`, `text/*`, missing) fall through.
-      if (!clientAcceptsSSE(request.headers.accept, { strict: strictAccept })) {
-        return await originalHandler.call(this, request, reply)
+      const acceptHeader = request.headers.accept
+
+      // Kind-specific gate.
+      //   'only'  — SSE-only route. Lenient gate: any spec-compliant Accept
+      //             admits SSE. Clients that explicitly refuse SSE get 406.
+      //   'dual'  — Route serves both SSE and non-SSE on the same handler.
+      //             Strict gate: only an explicit `text/event-stream` token
+      //             admits SSE; everything else falls through to the
+      //             handler, which is expected to serve a non-SSE response.
+      //   'legacy' — `sse: true` back-compat. Same routing as 'dual', plus
+      //              a clearer error if the fallback handler tries to use
+      //              `reply.sse` (signals "you wanted SSE-only — use
+      //              `sse: 'only'`").
+      if (kind === 'only') {
+        if (!clientAcceptsSSE(acceptHeader)) {
+          return reply.code(406).type('application/json').send({
+            statusCode: 406,
+            error: 'Not Acceptable',
+            message: "This endpoint only produces 'text/event-stream'."
+          })
+        }
+        // Fall through to SSE setup.
+      } else {
+        // 'dual' or 'legacy'
+        if (!clientAcceptsSSE(acceptHeader, { strict: true })) {
+          if (kind === 'legacy') {
+            try {
+              return await originalHandler.call(this, request, reply)
+            } catch (err) {
+              if (err instanceof TypeError && MISSING_SSE_ERROR_PATTERN.test(err.message)) {
+                throw new Error(
+                  '@fastify/sse: route registered with { sse: true } received ' +
+                  `Accept '${acceptHeader || '<missing>'}' (no explicit 'text/event-stream') ` +
+                  'and the handler then tried to use reply.sse. If this route only serves SSE, ' +
+                  'register it with { sse: \'only\' } so ambiguous Accept headers admit SSE per ' +
+                  'RFC 9110. If it serves both SSE and a non-SSE representation, register with ' +
+                  '{ sse: \'dual\' } and branch on the Accept header in the handler. ' +
+                  `(Underlying error: ${err.message})`
+                )
+              }
+              throw err
+            }
+          }
+          // 'dual' — handler intentionally handles the fallback.
+          return await originalHandler.call(this, request, reply)
+        }
+        // Fall through to SSE setup.
       }
 
-      // Set up SSE response
-      reply.raw.setHeader('Content-Type', 'text/event-stream')
-      reply.raw.setHeader('Cache-Control', 'no-cache')
-      reply.raw.setHeader('Connection', 'keep-alive')
-      reply.raw.setHeader('X-Accel-Buffering', 'no') // Disable Nginx buffering
-
-      // Create SSE context
+      // Set up SSE context. Headers are written lazily on the first send.
       const context = new SSEContext({
         reply,
         lastEventId: request.headers['last-event-id'],
@@ -502,19 +578,15 @@ async function fastifySSE (fastify, opts) {
       reply.sse = context
 
       let res
-      // Call original handler with SSE-enabled reply
-      // Note: Headers will be sent on first SSE send
       try {
         res = await originalHandler.call(this, request, reply)
       } catch (error) {
-        // If handler doesn't call keepAlive, close connection
         if (!context.shouldKeepAlive) {
           context.close()
         }
         throw error
       }
 
-      // If handler doesn't call keepAlive, close connection
       if (!context.shouldKeepAlive) {
         context.close()
       }
@@ -529,5 +601,5 @@ module.exports = fp(fastifySSE, {
   name: '@fastify/sse'
 })
 module.exports.default = fastifySSE
-module.exports.clientAcceptsSSE = clientAcceptsSSE
 module.exports.fastifySSE = fastifySSE
+module.exports.clientAcceptsSSE = clientAcceptsSSE

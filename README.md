@@ -57,27 +57,39 @@ await fastify.register(require('@fastify/sse'), {
   heartbeatInterval: 30000,
 
   // Optional: default serializer (default: JSON.stringify)
-  serializer: (data) => JSON.stringify(data),
-
-  // Optional: require an explicit `text/event-stream` token in the Accept
-  // header. Default (false) is spec-compliant — `*/*`, `text/*`, and missing
-  // Accept all admit SSE. See "Accept-Header Negotiation" below.
-  strictAccept: false
+  serializer: (data) => JSON.stringify(data)
 })
 ```
 
 ### Route Configuration
 
-```js
-// Enable SSE for a route
-fastify.get('/events', { sse: true }, handler)
+Routes opt into SSE handling by setting the `sse` field. There are three
+forms, each describing what the route serves:
 
-// With options
+```js
+// SSE-only route: handler always streams. Clients that explicitly refuse
+// SSE (e.g. `Accept: application/json`) receive 406 Not Acceptable.
+// Ambiguous Accept headers (*/*, text/*, missing) admit SSE per RFC 9110.
+fastify.get('/events', { sse: 'only' }, handler)
+
+// Dual-mode route: the same handler serves both SSE and non-SSE clients.
+// Only an explicit `text/event-stream` token routes to SSE; everything
+// else falls through to the handler with `reply.sse` undefined, so the
+// handler is expected to produce a non-SSE response in that branch.
+fastify.get('/data', { sse: 'dual' }, handler)
+
+// Back-compat: `sse: true` behaves like `'dual'` for routing. If the
+// handler is actually SSE-only and trips a TypeError on `reply.sse`
+// because of a wildcard Accept, the plugin rethrows with a clearer error
+// nudging you toward `sse: 'only'`.
+fastify.get('/legacy', { sse: true }, handler)
+
+// Object form (supports per-route options):
 fastify.get('/events', {
   sse: {
+    kind: 'only',                // 'only' | 'dual' — omit for back-compat
     heartbeat: false,            // Disable heartbeat for this route
-    serializer: customSerializer, // Custom serializer for this route
-    strictAccept: true           // Per-route opt-out of the SSE-wins default
+    serializer: customSerializer // Custom serializer for this route
   }
 }, handler)
 ```
@@ -250,56 +262,37 @@ fastify.get('/events', { sse: true }, async (request, reply) => {
 
 ### Accept-Header Negotiation
 
-The plugin decides whether to serve a request as SSE by parsing the `Accept`
-header per [RFC 9110 §12.5.1](https://www.rfc-editor.org/rfc/rfc9110#name-accept).
-By default, SSE is served when the client's Accept header admits
-`text/event-stream`, which is true for any of:
+The plugin parses the `Accept` header per [RFC 9110 §12.5.1](https://www.rfc-editor.org/rfc/rfc9110#name-accept)
+to decide whether to serve a request as SSE. The decision depends on the
+route's declared kind:
 
-- A missing or empty `Accept` header (any media type is acceptable).
-- `Accept: */*` — typical for `curl`, Postman, and `fetch()` defaults.
-- `Accept: text/*`.
-- `Accept: text/event-stream` (with quality value > 0).
+| Route kind     | Accept header              | Behavior                |
+|----------------|----------------------------|-------------------------|
+| `sse: 'only'`  | `text/event-stream`        | SSE                     |
+| `sse: 'only'`  | `*/*`, `text/*`, missing   | SSE                     |
+| `sse: 'only'`  | `application/json` etc.    | **406 Not Acceptable**  |
+| `sse: 'only'`  | `…, text/event-stream;q=0` | **406 Not Acceptable**  |
+| `sse: 'dual'`  | `text/event-stream`        | SSE branch              |
+| `sse: 'dual'`  | `*/*`, `text/*`, missing   | Non-SSE branch          |
+| `sse: 'dual'`  | `application/json`         | Non-SSE branch          |
+| `sse: true`    | (same routing as `'dual'`) | + clearer error on misuse |
 
-If the most specific matching range has `q=0` (e.g.
-`Accept: */*, text/event-stream;q=0`) the client has explicitly refused SSE
-and the plugin falls through to the regular handler.
+In short: explicit `text/event-stream` always routes to SSE; ambiguous
+wildcards route to SSE only when you've declared the route SSE-only.
+This keeps `curl`, `fetch()`, and Postman defaults working with SSE-only
+endpoints while preserving the dual-mode pattern's expectation that a
+wildcard prefers the richer non-SSE representation.
 
-**Opting out of the SSE-wins default.** Set `strictAccept: true` (at the
-plugin level or per route) to require an explicit `text/event-stream` token
-in the Accept header. Ambiguous headers (`*/*`, `text/*`, missing) will
-then fall through to the regular handler:
+### Fallback to Regular Responses (`sse: 'dual'`)
 
-```js
-// Plugin-wide opt-out
-await fastify.register(require('@fastify/sse'), { strictAccept: true })
-
-// Per-route opt-out
-fastify.get('/events', {
-  sse: { strictAccept: true }
-}, handler)
-```
-
-You can call the gate yourself via the exported `clientAcceptsSSE` helper
-if you need to make the same decision elsewhere:
+Dual-mode routes serve both SSE and non-SSE clients from a single
+handler. The plugin attaches `reply.sse` only when the client explicitly
+requested `text/event-stream`; otherwise the handler is invoked without
+`reply.sse` and is expected to produce a normal response. Branch on its
+presence:
 
 ```js
-const { clientAcceptsSSE } = require('@fastify/sse')
-clientAcceptsSSE('*/*')                       // true
-clientAcceptsSSE('application/json')          // false
-clientAcceptsSSE('*/*', { strict: true })     // false
-clientAcceptsSSE('text/event-stream', { strict: true }) // true
-```
-
-### Fallback to Regular Responses
-
-When `{ sse: true }` is set on a route, the plugin attaches `reply.sse` only
-for clients that admit `text/event-stream`. For clients that explicitly
-request a different media type (e.g. `Accept: application/json`), the route
-handler is invoked without `reply.sse`. Branch on its presence to serve a
-non-SSE fallback:
-
-```js
-fastify.get('/data', { sse: true }, async (request, reply) => {
+fastify.get('/data', { sse: 'dual' }, async (request, reply) => {
   const data = await getData()
 
   if (reply.sse) {
@@ -310,6 +303,24 @@ fastify.get('/data', { sse: true }, async (request, reply) => {
     return { data }
   }
 })
+```
+
+The SSE-specific response headers (`Content-Type: text/event-stream`
+etc.) are not committed until the first `reply.sse.send()` /
+`reply.sse.stream()` call, so a handler that decorates `reply.sse` but
+then returns a plain value falls through to Fastify's normal
+serialization path without corrupting the response.
+
+### Helper: `clientAcceptsSSE`
+
+Use the exported helper if you need to make the same decision elsewhere:
+
+```js
+const { clientAcceptsSSE } = require('@fastify/sse')
+clientAcceptsSSE('*/*')                                  // true
+clientAcceptsSSE('application/json')                     // false
+clientAcceptsSSE('*/*', { strict: true })                // false
+clientAcceptsSSE('text/event-stream', { strict: true })  // true
 ```
 
 ### Error Handling
