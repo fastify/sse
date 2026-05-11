@@ -57,7 +57,12 @@ await fastify.register(require('@fastify/sse'), {
   heartbeatInterval: 30000,
 
   // Optional: default serializer (default: JSON.stringify)
-  serializer: (data) => JSON.stringify(data)
+  serializer: (data) => JSON.stringify(data),
+
+  // Optional: require an explicit `text/event-stream` token in the Accept
+  // header. Default (false) is spec-compliant — `*/*`, `text/*`, and missing
+  // Accept all admit SSE. See "Accept-Header Negotiation" below.
+  strictAccept: false
 })
 ```
 
@@ -70,8 +75,9 @@ fastify.get('/events', { sse: true }, handler)
 // With options
 fastify.get('/events', {
   sse: {
-    heartbeat: false,           // Disable heartbeat for this route
-    serializer: customSerializer // Custom serializer for this route
+    heartbeat: false,            // Disable heartbeat for this route
+    serializer: customSerializer, // Custom serializer for this route
+    strictAccept: true           // Per-route opt-out of the SSE-wins default
   }
 }, handler)
 ```
@@ -242,20 +248,65 @@ fastify.get('/events', { sse: true }, async (request, reply) => {
 
 ## Advanced Usage
 
+### Accept-Header Negotiation
+
+The plugin decides whether to serve a request as SSE by parsing the `Accept`
+header per [RFC 9110 §12.5.1](https://www.rfc-editor.org/rfc/rfc9110#name-accept).
+By default, SSE is served when the client's Accept header admits
+`text/event-stream`, which is true for any of:
+
+- A missing or empty `Accept` header (any media type is acceptable).
+- `Accept: */*` — typical for `curl`, Postman, and `fetch()` defaults.
+- `Accept: text/*`.
+- `Accept: text/event-stream` (with quality value > 0).
+
+If the most specific matching range has `q=0` (e.g.
+`Accept: */*, text/event-stream;q=0`) the client has explicitly refused SSE
+and the plugin falls through to the regular handler.
+
+**Opting out of the SSE-wins default.** Set `strictAccept: true` (at the
+plugin level or per route) to require an explicit `text/event-stream` token
+in the Accept header. Ambiguous headers (`*/*`, `text/*`, missing) will
+then fall through to the regular handler:
+
+```js
+// Plugin-wide opt-out
+await fastify.register(require('@fastify/sse'), { strictAccept: true })
+
+// Per-route opt-out
+fastify.get('/events', {
+  sse: { strictAccept: true }
+}, handler)
+```
+
+You can call the gate yourself via the exported `clientAcceptsSSE` helper
+if you need to make the same decision elsewhere:
+
+```js
+const { clientAcceptsSSE } = require('@fastify/sse')
+clientAcceptsSSE('*/*')                       // true
+clientAcceptsSSE('application/json')          // false
+clientAcceptsSSE('*/*', { strict: true })     // false
+clientAcceptsSSE('text/event-stream', { strict: true }) // true
+```
+
 ### Fallback to Regular Responses
 
-Routes with `{ sse: true }` automatically fall back to regular handlers when the client doesn't request SSE:
+When `{ sse: true }` is set on a route, the plugin attaches `reply.sse` only
+for clients that admit `text/event-stream`. For clients that explicitly
+request a different media type (e.g. `Accept: application/json`), the route
+handler is invoked without `reply.sse`. Branch on its presence to serve a
+non-SSE fallback:
 
 ```js
 fastify.get('/data', { sse: true }, async (request, reply) => {
   const data = await getData()
 
-  // Check if this is an SSE request
-  if (request.headers.accept?.includes('text/event-stream')) {
-    // SSE client - stream the data
+  if (reply.sse) {
+    // SSE client — stream the data
     await reply.sse.send({ data })
   } else {
-    // Regular client - return JSON
+    // Regular client — return JSON
     return { data }
   }
 })

@@ -392,10 +392,77 @@ class SSEContext {
   }
 }
 
+/**
+ * Determine whether the client's Accept header admits `text/event-stream`.
+ *
+ * Implements the RFC 9110 §12.5.1 precedence model for the media ranges that
+ * are relevant to SSE — `text/event-stream`, `text/*`, and `*\/*`. Other
+ * media-type parameters are ignored; only the `q` parameter is honored.
+ *
+ * Default (lenient) behavior returns true when:
+ *   - Accept is missing or empty (any media type is acceptable),
+ *   - `text/event-stream`, `text/*`, or `*\/*` appears with a quality > 0
+ *     and is the most specific match present in the header.
+ *
+ * Pass `{ strict: true }` to require an explicit `text/event-stream` token
+ * with quality > 0; ambiguous headers (`*\/*`, `text/*`, missing) return
+ * false in strict mode.
+ *
+ * The most specific matching range wins (exact > subtype wildcard > full
+ * wildcard), so `*\/*, text/event-stream;q=0` correctly returns false.
+ *
+ * Quality values outside [0, 1] are ignored and the entry's quality defaults
+ * to 1 (the spec default when no qvalue is present).
+ *
+ * @param {string|undefined} acceptHeader
+ * @param {{ strict?: boolean }} [options]
+ * @returns {boolean}
+ */
+function clientAcceptsSSE (acceptHeader, options) {
+  const strict = options?.strict === true
+  if (!acceptHeader) return !strict
+
+  let bestSpecificity = -1
+  let bestQuality = 0
+
+  for (const part of acceptHeader.split(',')) {
+    const [rawType, ...params] = part.split(';')
+    const type = rawType.trim().toLowerCase()
+
+    let specificity
+    if (type === 'text/event-stream') specificity = 3
+    else if (!strict && type === 'text/*') specificity = 2
+    else if (!strict && type === '*/*') specificity = 1
+    else continue
+
+    let quality = 1
+    for (const p of params) {
+      const eq = p.indexOf('=')
+      if (eq === -1) continue
+      const key = p.slice(0, eq).trim().toLowerCase()
+      if (key !== 'q') continue
+      const parsed = Number.parseFloat(p.slice(eq + 1).trim())
+      // Per RFC 9110, qvalue is in [0, 1]; anything else is invalid and
+      // ignored (the entry's quality stays at the default of 1).
+      if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) {
+        quality = parsed
+      }
+    }
+
+    if (specificity > bestSpecificity) {
+      bestSpecificity = specificity
+      bestQuality = quality
+    }
+  }
+
+  return bestSpecificity >= 0 && bestQuality > 0
+}
+
 async function fastifySSE (fastify, opts) {
   const {
     heartbeatInterval = 30000,
-    serializer = JSON.stringify
+    serializer = JSON.stringify,
+    strictAccept: pluginStrictAccept = false
   } = opts
 
   // Add route-level SSE handler
@@ -404,12 +471,16 @@ async function fastifySSE (fastify, opts) {
 
     const originalHandler = routeOptions.handler
     const sseOptions = typeof routeOptions.sse === 'object' ? routeOptions.sse : {}
+    const strictAccept = sseOptions.strictAccept ?? pluginStrictAccept
 
     routeOptions.handler = async function sseHandler (request, reply) {
-      // Check if client accepts SSE
-      const acceptHeader = request.headers.accept || ''
-      if (!acceptHeader.includes('text/event-stream')) {
-        // Fall back to regular handler for non-SSE requests
+      // Decide whether to handle this request as SSE.
+      //   - Default (strictAccept: false): spec-compliant per RFC 9110 —
+      //     admit SSE for `text/event-stream`, `text/*`, `*\/*`, and missing
+      //     Accept.
+      //   - strictAccept: true — require an explicit `text/event-stream`
+      //     token; ambiguous headers (`*\/*`, `text/*`, missing) fall through.
+      if (!clientAcceptsSSE(request.headers.accept, { strict: strictAccept })) {
         return await originalHandler.call(this, request, reply)
       }
 
@@ -458,4 +529,5 @@ module.exports = fp(fastifySSE, {
   name: '@fastify/sse'
 })
 module.exports.default = fastifySSE
+module.exports.clientAcceptsSSE = clientAcceptsSSE
 module.exports.fastifySSE = fastifySSE
