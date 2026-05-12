@@ -1,15 +1,81 @@
 'use strict'
 
 const fp = require('fastify-plugin')
+const createError = require('@fastify/error')
 const { Readable, Transform } = require('stream')
 const { pipeline } = require('stream/promises')
+
+const FST_ERR_SSE_UNKNOWN_KIND = createError(
+  'FST_ERR_SSE_UNKNOWN_KIND',
+  "@fastify/sse: unknown sse kind '%s'. Use 'only' (SSE-only route), 'dual' (route serves both SSE and non-SSE), or omit for back-compat."
+)
+
+const FST_ERR_SSE_INVALID_OPTION = createError(
+  'FST_ERR_SSE_INVALID_OPTION',
+  "@fastify/sse: unsupported value for route option 'sse': %s. Use true, 'dual', 'only', or an options object."
+)
+
+const FST_ERR_SSE_LEGACY_MISUSE = createError(
+  'FST_ERR_SSE_LEGACY_MISUSE',
+  "@fastify/sse: route registered with { sse: true } received Accept '%s' (no explicit 'text/event-stream') " +
+  'and the handler then tried to use reply.sse. If this route only serves SSE, ' +
+  "register it with { sse: 'only' } so ambiguous Accept headers admit SSE per " +
+  'RFC 9110. If it serves both SSE and a non-SSE representation, register with ' +
+  "{ sse: 'dual' } and branch on the Accept header in the handler. " +
+  '(Underlying error: %s)'
+)
+
+const FST_ERR_SSE_CONNECTION_CLOSED = createError(
+  'FST_ERR_SSE_CONNECTION_CLOSED',
+  'SSE connection is closed'
+)
+
+// Character codes used by the Accept-header scanner. Hoisted to module scope
+// so V8 treats them as constants and the tight loops below stay monomorphic.
+const CC_SP = 32
+const CC_HT = 9
+const CC_COMMA = 44
+const CC_SEMI = 59
+const CC_EQ = 61
+const CC_DOT = 46
+const CC_ZERO = 48
+const CC_LOWER_Q = 113
+const CC_UPPER_Q = 81
+
+function ciEqualsAt (s, start, end, lower) {
+  if (end - start !== lower.length) return false
+  for (let j = 0; j < lower.length; j++) {
+    let c = s.charCodeAt(start + j)
+    if (c >= 65 && c <= 90) c |= 32
+    if (c !== lower.charCodeAt(j)) return false
+  }
+  return true
+}
+
+function isQValueZero (s, start, end) {
+  if (end <= start) return false
+  if (s.charCodeAt(start) !== CC_ZERO) return false
+  let i = start + 1
+  if (i < end && s.charCodeAt(i) === CC_DOT) {
+    i++
+    while (i < end) {
+      if (s.charCodeAt(i) !== CC_ZERO) return false
+      i++
+    }
+  }
+  return i === end
+}
 
 /**
  * Determine whether the client's Accept header admits `text/event-stream`.
  *
  * Implements the RFC 9110 §12.5.1 precedence model for the media ranges that
  * are relevant to SSE — `text/event-stream`, `text/*`, and `*\/*`. Other
- * media-type parameters are ignored; only the `q` parameter is honored.
+ * media-type parameters are ignored; only the `q` parameter is honored, and
+ * only the binary distinction `q=0` (explicit refuse) vs `q>0` (admit) is
+ * preserved. Fractional qvalues like `q=0.5` are treated identically to
+ * `q=1`: observably equivalent here because the function picks the winning
+ * media range by specificity, not by comparing fractional qvalues.
  *
  * Default (lenient) returns true when the header is missing, empty, or
  * contains a matching range with quality > 0. The most specific matching
@@ -19,49 +85,116 @@ const { pipeline } = require('stream/promises')
  * with quality > 0; ambiguous headers (`*\/*`, `text/*`, missing) return
  * false in strict mode.
  *
- * Quality values outside [0, 1] are ignored and the entry's quality defaults
- * to 1 (the spec default when no qvalue is present).
+ * Hot paths (`text/event-stream`, `*\/*`, `text/*`) short-circuit before any
+ * scanning, so the common case is a single string-equality compare.
  *
  * @param {string|undefined} acceptHeader
  * @param {{ strict?: boolean }} [options]
  * @returns {boolean}
  */
 function clientAcceptsSSE (acceptHeader, options) {
-  const strict = options?.strict === true
+  const strict = options !== undefined && options.strict === true
   if (!acceptHeader) return !strict
 
-  let bestSpecificity = -1
-  let bestQuality = 0
+  // Hot path: the literal values that EventSource and common HTTP clients
+  // actually emit. Caught with a single ===, no allocation.
+  if (acceptHeader === 'text/event-stream') return true
+  if (!strict && (acceptHeader === '*/*' || acceptHeader === 'text/*')) return true
 
-  for (const part of acceptHeader.split(',')) {
-    const [rawType, ...params] = part.split(';')
-    const type = rawType.trim().toLowerCase()
+  // Slow path: walk the header in place via charCodeAt. No .split(),
+  // no .toLowerCase(), no .trim(), no substrings allocated.
+  const len = acceptHeader.length
+  let bestSpec = -1
+  let bestRefused = false
+  let i = 0
 
-    let specificity
-    if (type === 'text/event-stream') specificity = 3
-    else if (!strict && type === 'text/*') specificity = 2
-    else if (!strict && type === '*/*') specificity = 1
-    else continue
+  while (i < len) {
+    while (i < len) {
+      const c = acceptHeader.charCodeAt(i)
+      if (c !== CC_SP && c !== CC_HT) break
+      i++
+    }
 
-    let quality = 1
-    for (const p of params) {
-      const eq = p.indexOf('=')
-      if (eq === -1) continue
-      const key = p.slice(0, eq).trim().toLowerCase()
-      if (key !== 'q') continue
-      const parsed = Number.parseFloat(p.slice(eq + 1).trim())
-      if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 1) {
-        quality = parsed
+    const typeStart = i
+    while (i < len) {
+      const c = acceptHeader.charCodeAt(i)
+      if (c === CC_SEMI || c === CC_COMMA) break
+      i++
+    }
+    let typeEnd = i
+    while (typeEnd > typeStart) {
+      const c = acceptHeader.charCodeAt(typeEnd - 1)
+      if (c !== CC_SP && c !== CC_HT) break
+      typeEnd--
+    }
+
+    let spec = -1
+    if (ciEqualsAt(acceptHeader, typeStart, typeEnd, 'text/event-stream')) spec = 3
+    else if (!strict && ciEqualsAt(acceptHeader, typeStart, typeEnd, 'text/*')) spec = 2
+    else if (!strict && ciEqualsAt(acceptHeader, typeStart, typeEnd, '*/*')) spec = 1
+
+    let refused = false
+    if (spec === -1) {
+      // Non-matching entry: skip its parameters in one jump.
+      while (i < len && acceptHeader.charCodeAt(i) !== CC_COMMA) i++
+    } else {
+      // Spec note: per RFC 9110 §5.6.6, `parameter = parameter-name "="
+      // parameter-value` permits no OWS inside the parameter — only around
+      // the `;` separator. We honor the OWS-around-`;` case (which browsers
+      // emit as `; q=0.8`) but do not handle OWS adjacent to `=` or
+      // trailing OWS on the value/key (which would be malformed input
+      // anyway). Node's HTTP parser also strips leading + trailing OWS
+      // from the whole header value, so the only WS we see in production
+      // is OWS after `,` and after `;`.
+      while (i < len && acceptHeader.charCodeAt(i) === CC_SEMI) {
+        i++
+        while (i < len) {
+          const c = acceptHeader.charCodeAt(i)
+          if (c !== CC_SP && c !== CC_HT) break
+          i++
+        }
+        const keyStart = i
+        while (i < len) {
+          const c = acceptHeader.charCodeAt(i)
+          if (c === CC_EQ || c === CC_SEMI || c === CC_COMMA) break
+          i++
+        }
+        const keyEnd = i
+
+        if (i < len && acceptHeader.charCodeAt(i) === CC_EQ) {
+          i++
+          const valStart = i
+          while (i < len) {
+            const c = acceptHeader.charCodeAt(i)
+            if (c === CC_SEMI || c === CC_COMMA) break
+            i++
+          }
+          const valEnd = i
+
+          if (keyEnd - keyStart === 1) {
+            const kc = acceptHeader.charCodeAt(keyStart)
+            if ((kc === CC_LOWER_Q || kc === CC_UPPER_Q) &&
+                isQValueZero(acceptHeader, valStart, valEnd)) {
+              refused = true
+            }
+          }
+        }
       }
     }
 
-    if (specificity > bestSpecificity) {
-      bestSpecificity = specificity
-      bestQuality = quality
+    // text/event-stream with a non-refused qvalue has the maximum
+    // specificity; nothing later in the list can outrank it.
+    if (spec === 3 && !refused) return true
+
+    if (spec > bestSpec) {
+      bestSpec = spec
+      bestRefused = refused
     }
+
+    if (i < len && acceptHeader.charCodeAt(i) === CC_COMMA) i++
   }
 
-  return bestSpecificity >= 0 && bestQuality > 0
+  return bestSpec >= 0 && !bestRefused
 }
 
 /**
@@ -86,17 +219,11 @@ function resolveSSEConfig (sseField) {
   if (typeof sseField === 'object' && sseField !== null) {
     const kind = sseField.kind ?? 'legacy'
     if (kind !== 'legacy' && kind !== 'dual' && kind !== 'only') {
-      throw new Error(
-        `@fastify/sse: unknown sse kind '${kind}'. Use 'only' (SSE-only route), ` +
-        '\'dual\' (route serves both SSE and non-SSE), or omit for back-compat.'
-      )
+      throw new FST_ERR_SSE_UNKNOWN_KIND(kind)
     }
     return { kind, options: sseField }
   }
-  throw new Error(
-    `@fastify/sse: unsupported value for route option 'sse': ${JSON.stringify(sseField)}. ` +
-    'Use true, \'dual\', \'only\', or an options object.'
-  )
+  throw new FST_ERR_SSE_INVALID_OPTION(JSON.stringify(sseField))
 }
 
 const MISSING_SSE_ERROR_PATTERN = /Cannot read prop(?:erties)? of undefined.*'(?:send|stream|keepAlive|close|sendHeaders|replay|onClose)'/
@@ -319,7 +446,7 @@ class SSEContext {
    */
   async send (source) {
     if (!this.#isConnected) {
-      throw new Error('SSE connection is closed')
+      throw new FST_ERR_SSE_CONNECTION_CLOSED()
     }
 
     // Handle single message
@@ -371,7 +498,7 @@ class SSEContext {
    */
   stream () {
     if (!this.#isConnected) {
-      throw new Error('SSE connection is closed')
+      throw new FST_ERR_SSE_CONNECTION_CLOSED()
     }
 
     const transform = createSSETransformStream({ serializer: this.serializer })
@@ -548,15 +675,7 @@ async function fastifySSE (fastify, opts) {
               return await originalHandler.call(this, request, reply)
             } catch (err) {
               if (err instanceof TypeError && MISSING_SSE_ERROR_PATTERN.test(err.message)) {
-                throw new Error(
-                  '@fastify/sse: route registered with { sse: true } received ' +
-                  `Accept '${acceptHeader || '<missing>'}' (no explicit 'text/event-stream') ` +
-                  'and the handler then tried to use reply.sse. If this route only serves SSE, ' +
-                  'register it with { sse: \'only\' } so ambiguous Accept headers admit SSE per ' +
-                  'RFC 9110. If it serves both SSE and a non-SSE representation, register with ' +
-                  '{ sse: \'dual\' } and branch on the Accept header in the handler. ' +
-                  `(Underlying error: ${err.message})`
-                )
+                throw new FST_ERR_SSE_LEGACY_MISUSE(acceptHeader || '<missing>', err.message)
               }
               throw err
             }
