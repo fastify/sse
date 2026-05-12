@@ -196,7 +196,7 @@ expect(routeOptions3).type.toBeAssignableTo<RouteShorthandOptions>()
 
 // Test invalid route options - these tests verify type checking
 app.get('/invalid', {
-  // @ts-expect-error Type 'string' is not assignable
+  // @ts-expect-error Type '"invalid"' is not assignable to type 'SSERouteOptions'
   sse: 'invalid'
 }, async (request, reply) => { })
 app.get('/invalid2', {
@@ -205,3 +205,19 @@ app.get('/invalid2', {
     unknownOption: true
   }
 }, async (request, reply) => { })
+
+// Test valid kind shorthand
+app.get('/only', { sse: 'only' }, async (request, reply) => {
+  return reply.sse.send({ data: 'hello' })
+})
+app.get('/dual', { sse: 'dual' }, async (request, reply) => {
+  if (reply.sse) return reply.sse.send({ data: 'hello' })
+  return { fallback: true }
+})
+
+// Test object form with kind
+app.get('/only-obj', {
+  sse: { kind: 'only', heartbeat: false }
+}, async (request, reply) => {
+  return reply.sse.send({ data: 'hello' })
+})
