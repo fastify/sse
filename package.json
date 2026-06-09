@@ -33,6 +33,7 @@
     "fastify": "^5.x"
   },
   "dependencies": {
+    "@fastify/error": "^4.2.0",
     "fastify-plugin": "^5.0.0"
   },
   "devDependencies": {
