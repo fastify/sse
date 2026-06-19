@@ -19,8 +19,14 @@ declare module 'fastify' {
  * - `'dual'` — Route serves both SSE and non-SSE on the same handler.
  *   Strict gate: only an explicit `text/event-stream` token admits SSE;
  *   the handler must branch on `reply.sse` to serve other clients.
+ * - `'manual'` — No Accept negotiation. `reply.sse` is always attached and
+ *   the handler decides at runtime whether to stream (by calling
+ *   `reply.sse.*`) or to return a normal response. Useful for streaming
+ *   APIs that signal streaming via the request body (e.g. OpenAI-style
+ *   `{ stream: true }`) rather than the Accept header. The connection is
+ *   closed automatically when the handler resolves or throws.
  */
-export type SSERouteKind = 'only' | 'dual'
+export type SSERouteKind = 'only' | 'dual' | 'manual'
 
 /**
  * Per-route SSE options.
@@ -29,7 +35,7 @@ export type SSERouteKind = 'only' | 'dual'
  * - `true` — Back-compat. Routes like `'dual'` for gate behavior; on the
  *   fallback path the plugin rethrows with a message naming `'only'` as
  *   the fix if the handler tries to use `reply.sse`.
- * - `'only'` / `'dual'` — Shorthand for the matching kind.
+ * - `'only'` / `'dual'` / `'manual'` — Shorthand for the matching kind.
  * - Object form — Same kinds via `kind`, plus per-route option overrides.
  *   `kind` omitted = back-compat behavior, equivalent to `sse: true`.
  */

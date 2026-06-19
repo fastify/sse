@@ -214,10 +214,20 @@ app.get('/dual', { sse: 'dual' }, async (request, reply) => {
   if (reply.sse) return reply.sse.send({ data: 'hello' })
   return { fallback: true }
 })
+app.post('/manual', { sse: 'manual' }, async (request, reply) => {
+  const body = request.body as { stream?: boolean }
+  if (body.stream) return reply.sse.send({ data: 'hello' })
+  return { fallback: true }
+})
 
 // Test object form with kind
 app.get('/only-obj', {
   sse: { kind: 'only', heartbeat: false }
+}, async (request, reply) => {
+  return reply.sse.send({ data: 'hello' })
+})
+app.post('/manual-obj', {
+  sse: { kind: 'manual', heartbeat: false }
 }, async (request, reply) => {
   return reply.sse.send({ data: 'hello' })
 })
