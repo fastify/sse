@@ -78,6 +78,13 @@ fastify.get('/events', { sse: 'only' }, handler)
 // handler is expected to produce a non-SSE response in that branch.
 fastify.get('/data', { sse: 'dual' }, handler)
 
+// Manual route: no Accept negotiation. `reply.sse` is always attached and
+// the handler decides at runtime whether to stream (by calling reply.sse.*)
+// or to return a normal response. Useful for streaming APIs that signal
+// streaming via the request body (e.g. OpenAI-style `{ stream: true }`)
+// rather than the Accept header.
+fastify.post('/v1/chat', { sse: 'manual' }, handler)
+
 // Back-compat: `sse: true` behaves like `'dual'` for routing. If the
 // handler is actually SSE-only and trips a TypeError on `reply.sse`
 // because of a wildcard Accept, the plugin rethrows with a message
@@ -87,7 +94,7 @@ fastify.get('/legacy', { sse: true }, handler)
 // Object form (supports per-route options):
 fastify.get('/events', {
   sse: {
-    kind: 'only',                // 'only' | 'dual' — omit for back-compat
+    kind: 'only',                // 'only' | 'dual' | 'manual' — omit for back-compat
     heartbeat: false,            // Disable heartbeat for this route
     serializer: customSerializer // Custom serializer for this route
   }
@@ -275,6 +282,7 @@ route's declared kind:
 | `sse: 'dual'`  | `text/event-stream`        | SSE branch              |
 | `sse: 'dual'`  | `*/*`, `text/*`, missing   | Non-SSE branch          |
 | `sse: 'dual'`  | `application/json`         | Non-SSE branch          |
+| `sse: 'manual'`| (any / missing)            | Handler decides at runtime |
 | `sse: true`    | (same routing as `'dual'`) | + explanatory error on misuse |
 
 In short: explicit `text/event-stream` always routes to SSE; ambiguous
@@ -310,6 +318,41 @@ etc.) are not committed until the first `reply.sse.send()` /
 `reply.sse.stream()` call, so a handler that decorates `reply.sse` but
 then returns a plain value falls through to Fastify's normal
 serialization path without corrupting the response.
+
+### Dynamic Streaming Based on Request Logic (`sse: 'manual'`)
+
+Some APIs decide whether to stream based on the request **body** rather
+than the `Accept` header. OpenAI-compatible and other LLM endpoints, for
+example, return a `text/event-stream` response when the request carries
+`{ "stream": true }` and a single JSON object otherwise — the client
+sends no `Accept: text/event-stream` header either way.
+
+`sse: 'manual'` covers this: it skips Accept-header negotiation entirely,
+always attaches `reply.sse`, and lets the handler decide at runtime
+whether to stream. As with `'dual'`, SSE headers are committed lazily on
+the first `reply.sse.send()` / `reply.sse.stream()` call, so a handler
+that never streams falls through to Fastify's normal serialization.
+
+```js
+fastify.post('/v1/chat/completions', { sse: 'manual' }, async (request, reply) => {
+  const completion = await model.run(request.body)
+
+  if (request.body.stream) {
+    // Stream tokens as SSE — headers commit on the first send().
+    await reply.sse.send(completion.tokens) // async iterable / Readable / messages
+    return
+  }
+
+  // Non-streaming client — return a normal JSON response.
+  return completion.toJSON()
+})
+```
+
+The connection is closed automatically when the handler resolves or
+throws (call `reply.sse.keepAlive()` to keep it open for out-of-band
+sends, then `reply.sse.close()` when done). Because the heartbeat only
+starts once the response is committed as SSE, a non-streaming fallback
+response is never corrupted by a heartbeat write.
 
 
 ### Error Handling
@@ -436,6 +479,7 @@ app.get('/events', { sse: true }, async (request, reply) => {
 See the [examples](examples/) directory for complete working examples:
 
 - [Basic Usage](examples/basic.js) - Simple SSE endpoints
+- [Dynamic Streaming](examples/manual-streaming.js) - `sse: 'manual'`, OpenAI-style stream-or-JSON based on the request body
 - More examples coming soon...
 
 ## Comparison with fastify-sse-v2

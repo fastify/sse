@@ -7,12 +7,12 @@ const { pipeline } = require('stream/promises')
 
 const FST_ERR_SSE_UNKNOWN_KIND = createError(
   'FST_ERR_SSE_UNKNOWN_KIND',
-  "@fastify/sse: unknown sse kind '%s'. Use 'only' (SSE-only route), 'dual' (route serves both SSE and non-SSE), or omit for back-compat."
+  "@fastify/sse: unknown sse kind '%s'. Use 'only' (SSE-only route), 'dual' (route serves both SSE and non-SSE), 'manual' (handler decides at runtime, no Accept negotiation), or omit for back-compat."
 )
 
 const FST_ERR_SSE_INVALID_OPTION = createError(
   'FST_ERR_SSE_INVALID_OPTION',
-  "@fastify/sse: unsupported value for route option 'sse': %s. Use true, 'dual', 'only', or an options object."
+  "@fastify/sse: unsupported value for route option 'sse': %s. Use true, 'dual', 'only', 'manual', or an options object."
 )
 
 const FST_ERR_SSE_LEGACY_MISUSE = createError(
@@ -208,17 +208,24 @@ function clientAcceptsSSE (acceptHeader, options) {
  *                       reply.sse is undefined)
  *   - `sse: 'only'`   → kind 'only'  (SSE-only: lenient gate, returns 406
  *                       Not Acceptable to clients that explicitly refuse SSE)
- *   - `sse: { ... }`  → object form; same kinds via `kind: 'dual' | 'only'`,
- *                       or `kind` omitted = 'legacy' for back-compat with
- *                       existing `{ heartbeat, serializer, ... }` shapes
+ *   - `sse: 'manual'` → kind 'manual' (no Accept negotiation: `reply.sse` is
+ *                       always attached and the handler decides at runtime
+ *                       whether to stream — by calling `reply.sse.*` — or to
+ *                       return a normal response. The connection is closed
+ *                       automatically when the handler resolves or throws.)
+ *   - `sse: { ... }`  → object form; same kinds via
+ *                       `kind: 'dual' | 'only' | 'manual'`, or `kind` omitted
+ *                       = 'legacy' for back-compat with existing
+ *                       `{ heartbeat, serializer, ... }` shapes
  */
 function resolveSSEConfig (sseField) {
   if (sseField === true) return { kind: 'legacy', options: {} }
   if (sseField === 'dual') return { kind: 'dual', options: {} }
   if (sseField === 'only') return { kind: 'only', options: {} }
+  if (sseField === 'manual') return { kind: 'manual', options: {} }
   if (typeof sseField === 'object' && sseField !== null) {
     const kind = sseField.kind ?? 'legacy'
-    if (kind !== 'legacy' && kind !== 'dual' && kind !== 'only') {
+    if (kind !== 'legacy' && kind !== 'dual' && kind !== 'only' && kind !== 'manual') {
       throw new FST_ERR_SSE_UNKNOWN_KIND(kind)
     }
     return { kind, options: sseField }
@@ -317,6 +324,7 @@ class SSEContext {
     this.#keepAlive = false
     this.#headersSent = false
     this.heartbeatTimer = null
+    this.heartbeatInterval = options.heartbeatInterval
     this.closeCallbacks = []
     this.serializer = options.serializer
 
@@ -334,11 +342,6 @@ class SSEContext {
       // Log as info since client disconnections are normal
       this.reply.log.info({ err: error }, 'SSE connection closed')
     })
-
-    // Start heartbeat if enabled
-    if (options.heartbeatInterval > 0) {
-      this.startHeartbeat(options.heartbeatInterval)
-    }
   }
 
   /**
@@ -435,6 +438,15 @@ class SSEContext {
 
       this.reply.raw.writeHead(200)
       this.#headersSent = true
+
+      // Start the heartbeat only once the response is committed as SSE.
+      // Deferring it until here means a handler that decorates reply.sse
+      // but ultimately returns a non-SSE response (e.g. a 'manual' route
+      // that branches on the request body) is never interrupted by a
+      // heartbeat write corrupting its payload.
+      if (this.heartbeatInterval > 0) {
+        this.startHeartbeat(this.heartbeatInterval)
+      }
     }
   }
 
@@ -658,6 +670,11 @@ async function fastifySSE (fastify, opts) {
       //              (which is undefined because the gate refused), the
       //              plugin rethrows with a message that names
       //              `sse: 'only'` as the likely fix.
+      //   'manual' — No Accept negotiation at all. `reply.sse` is always
+      //              attached and the handler decides at runtime whether to
+      //              stream. This supports clients (OpenAI-style streaming
+      //              APIs and other LLM endpoints) that signal streaming via
+      //              the request body rather than the Accept header.
       if (kind === 'only') {
         if (!clientAcceptsSSE(acceptHeader)) {
           return reply.code(406).type('application/json').send({
@@ -667,8 +684,7 @@ async function fastifySSE (fastify, opts) {
           })
         }
         // Fall through to SSE setup.
-      } else {
-        // 'dual' or 'legacy'
+      } else if (kind === 'dual' || kind === 'legacy') {
         if (!clientAcceptsSSE(acceptHeader, { strict: true })) {
           if (kind === 'legacy') {
             try {
@@ -685,6 +701,7 @@ async function fastifySSE (fastify, opts) {
         }
         // Fall through to SSE setup.
       }
+      // 'manual' — skip negotiation entirely and fall through to SSE setup.
 
       // Set up SSE context. Headers are written lazily on the first send.
       const context = new SSEContext({
