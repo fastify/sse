@@ -269,7 +269,7 @@ fastify.get('/events', { sse: true }, async (request, reply) => {
 
 ### Accept-Header Negotiation
 
-The plugin parses the `Accept` header per [RFC 9110 §12.5.1](https://www.rfc-editor.org/rfc/rfc9110#name-accept)
+The plugin parses the `Accept` header per [RFC 9110 §12.5.1](https://www.rfc-editor.org/rfc/rfc9110.html#name-accept)
 to decide whether to serve a request as SSE. The decision depends on the
 route's declared kind:
 
