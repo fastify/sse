@@ -138,11 +138,14 @@ export interface SSEReplyInterface {
   /**
    * Send HTTP headers for the SSE response if not already sent.
    * This method ensures headers set via reply.header() are transferred
-   * to the raw response before calling writeHead(200).
-   * Called automatically before the first SSE data is sent, but can
-   * also be called manually if needed.
+   * to the raw response before writing the response head. The status code
+   * is resolved in order: the explicit `statusCode` argument, then the
+   * value set via reply.code(), then 200.
+   * Called automatically (without arguments) before the first SSE data is
+   * sent, but can also be called manually — call it before any data is
+   * written for an explicit status to take effect.
    */
-  sendHeaders(): void
+  sendHeaders(statusCode?: number): void
 }
 
 export declare const fastifySSE: FastifyPluginAsync<SSEPluginOptions>

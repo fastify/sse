@@ -416,14 +416,19 @@ class SSEContext {
   /**
    * Sends HTTP headers for the SSE response if not already sent.
    * Applies the SSE-specific response headers, transfers any headers set
-   * via reply.header(), and calls writeHead(200). Called automatically
-   * before the first SSE data is sent, but can also be called manually.
+   * via reply.header(), and writes the response head. The status code is
+   * resolved in order: the explicit `statusCode` argument, then the value
+   * set via reply.code(), then 200. The automatic call before the first
+   * SSE write passes no argument, so an explicit status only takes effect
+   * on manual calls made before any data is sent.
    *
    * Until this fires, the response is not yet committed as SSE — a handler
    * that never writes SSE data will return through Fastify's normal
    * serialization path.
+   *
+   * @param {number} [statusCode] - HTTP status for the SSE response.
    */
-  sendHeaders () {
+  sendHeaders (statusCode) {
     if (!this.#headersSent) {
       this.reply.raw.setHeader('Content-Type', 'text/event-stream')
       this.reply.raw.setHeader('Cache-Control', 'no-cache')
@@ -436,7 +441,10 @@ class SSEContext {
         this.reply.raw.setHeader(name, value)
       }
 
-      this.reply.raw.writeHead(200)
+      // Status precedence: explicit sendHeaders() argument, then the value
+      // the handler set via reply.code() (stored on raw.statusCode), then
+      // 200 as the final fallback.
+      this.reply.raw.writeHead(statusCode ?? this.reply.raw.statusCode ?? 200)
       this.#headersSent = true
 
       // Start the heartbeat only once the response is committed as SSE.

@@ -263,7 +263,29 @@ fastify.get('/events', { sse: true }, async (request, reply) => {
 - `reply.sse.close()`: Manually close the connection
 - `reply.sse.replay(callback)`: Handle message replay using Last-Event-ID
 - `reply.sse.onClose(callback)`: Register callback for when connection closes
-- `reply.sse.sendHeaders()`: Manually send headers (called automatically on first write)
+- `reply.sse.sendHeaders(statusCode?)`: Manually send headers (called automatically on first write)
+
+### Custom Response Status Code
+
+The SSE response defaults to `200 OK`. To use a different status, either call
+`reply.code()` before the first SSE write, or pass the status directly to a
+manual `reply.sse.sendHeaders()` call:
+
+```javascript
+fastify.get('/events', { sse: 'only' }, async (request, reply) => {
+  reply.code(201)
+  await reply.sse.send({ data: 'created' })
+})
+
+fastify.get('/events-explicit', { sse: 'only' }, async (request, reply) => {
+  reply.sse.sendHeaders(201)
+  await reply.sse.send({ data: 'created' })
+})
+```
+
+An explicit `sendHeaders()` argument takes precedence over `reply.code()`.
+Once the first SSE write commits the response headers, later `reply.code()`
+or `sendHeaders()` calls have no effect.
 
 ## Advanced Usage
 
