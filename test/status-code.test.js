@@ -128,3 +128,31 @@ test('status changes after headers are committed should have no effect', async (
   assert.ok(response.body.includes('data: "first"'))
   assert.ok(response.body.includes('data: "second"'))
 })
+
+async function buildApp (t, options = {}) {
+  const app = Fastify({ logger: false })
+
+  t.after(async () => {
+    await app.close()
+  })
+
+  await app.register(fastifySSE, options)
+  return app
+}
+
+test('falls back to status 200 when no response status is available', async (t) => {
+  const app = await buildApp(t, { heartbeatInterval: 0 })
+
+  app.get('/events', { sse: 'only' }, async (request, reply) => {
+    Object.defineProperty(reply.raw, 'statusCode', {
+      configurable: true,
+      writable: true,
+      value: undefined
+    })
+    reply.sse.sendHeaders()
+  })
+
+  const response = await app.inject({ url: '/events' })
+
+  assert.strictEqual(response.statusCode, 200)
+})

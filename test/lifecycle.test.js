@@ -4,6 +4,7 @@ const { test } = require('node:test')
 const { strict: assert } = require('node:assert')
 const Fastify = require('fastify')
 const fastifySSE = require('../index.js')
+const { setTimeout: sleep } = require('node:timers/promises')
 
 test('Last-Event-ID header parsing', async (t) => {
   const fastify = Fastify({ logger: false })
@@ -184,4 +185,199 @@ test('error handling in async iterator', async (t) => {
   const body = response.body
   assert.ok(body.includes('data: "before error"'))
   assert.ok(body.includes('data: "error handled"'))
+})
+
+async function buildApp (t, options = {}) {
+  const app = Fastify({ logger: false })
+
+  t.after(async () => {
+    await app.close()
+  })
+
+  await app.register(fastifySSE, options)
+  return app
+}
+
+test('handles replay without an event ID and rejects invalid sources', async (t) => {
+  const app = await buildApp(t, { heartbeatInterval: 0 })
+  let replayCalls = 0
+
+  app.get('/events', { sse: true }, async (request, reply) => {
+    await reply.sse.replay(async () => {
+      replayCalls++
+    })
+
+    for (const source of [null, 42, {}]) {
+      await assert.rejects(
+        () => reply.sse.send(source),
+        { name: 'TypeError', message: 'Invalid SSE source type' }
+      )
+    }
+
+    await reply.sse.send({ data: 'valid' })
+  })
+
+  const response = await app.inject({
+    url: '/events',
+    headers: { accept: 'text/event-stream' }
+  })
+
+  assert.strictEqual(replayCalls, 0)
+  assert.match(response.body, /data: "valid"/)
+})
+
+test('closed contexts reject writes and stop restarted heartbeats', async (t) => {
+  const app = await buildApp(t, { heartbeatInterval: 0 })
+  let context
+
+  app.get('/events', { sse: true }, async (request, reply) => {
+    context = reply.sse
+    reply.sse.close()
+    reply.sse.close()
+
+    assert.throws(
+      () => reply.sse.stream(),
+      { message: 'SSE connection is closed' }
+    )
+    await assert.rejects(
+      () => reply.sse.send({ data: 'late' }),
+      { message: 'SSE connection is closed' }
+    )
+  })
+
+  const response = await app.inject({
+    url: '/events',
+    headers: { accept: 'text/event-stream' }
+  })
+
+  assert.strictEqual(response.statusCode, 200)
+  assert.strictEqual(context.isConnected, false)
+
+  context.startHeartbeat(1)
+  await sleep(20)
+  assert.strictEqual(context.heartbeatTimer, null)
+})
+
+test('detects a connection closed synchronously by the serializer', async (t) => {
+  let context
+  const app = await buildApp(t, {
+    heartbeatInterval: 0,
+    serializer (data) {
+      context.close()
+      return JSON.stringify(data)
+    }
+  })
+
+  app.get('/events', { sse: true }, async (request, reply) => {
+    context = reply.sse
+    await assert.rejects(
+      () => reply.sse.send({ data: 'value' }),
+      { message: 'SSE connection is closed' }
+    )
+  })
+
+  const response = await app.inject({
+    url: '/events',
+    headers: { accept: 'text/event-stream' }
+  })
+
+  assert.strictEqual(response.statusCode, 200)
+  assert.strictEqual(context.isConnected, false)
+})
+
+test('stops an async iterable when the connection closes', async (t) => {
+  const app = await buildApp(t, { heartbeatInterval: 0 })
+
+  app.get('/events', { sse: true }, async (request, reply) => {
+    async function * events () {
+      yield { data: 'first' }
+      reply.sse.close()
+      yield { data: 'second' }
+    }
+
+    await reply.sse.send(events())
+  })
+
+  const response = await app.inject({
+    url: '/events',
+    headers: { accept: 'text/event-stream' }
+  })
+
+  assert.match(response.body, /data: "first"/)
+  assert.doesNotMatch(response.body, /second/)
+})
+
+test('emits heartbeats and clears the timer when closed', async (t) => {
+  const app = await buildApp(t, { heartbeatInterval: 5 })
+  let context
+
+  app.get('/events', { sse: true }, async (request, reply) => {
+    context = reply.sse
+    reply.sse.sendHeaders()
+    reply.sse.keepAlive()
+    setTimeout(() => reply.sse.close(), 40)
+  })
+
+  const response = await app.inject({
+    url: '/events',
+    headers: { accept: 'text/event-stream' }
+  })
+
+  assert.match(response.body, /: heartbeat\n\n/)
+  assert.strictEqual(context.heartbeatTimer, null)
+})
+
+test('logs close callback failures without preventing cleanup', async (t) => {
+  const app = await buildApp(t, { heartbeatInterval: 0 })
+  const consoleError = t.mock.method(console, 'error', () => {})
+  let context
+
+  app.get('/events', { sse: true }, async (request, reply) => {
+    context = reply.sse
+    reply.sse.onClose(() => {
+      throw new Error('close callback failed')
+    })
+    await reply.sse.send({ data: 'value' })
+  })
+
+  await app.inject({
+    url: '/events',
+    headers: { accept: 'text/event-stream' }
+  })
+
+  assert.strictEqual(consoleError.mock.callCount(), 1)
+  assert.strictEqual(context.closeCallbacks.length, 0)
+})
+
+test('cleans up when handlers fail with and without keepAlive', async (t) => {
+  const app = await buildApp(t, { heartbeatInterval: 0 })
+  let closedContext
+  let keptContext
+
+  app.get('/closed', { sse: true }, async (request, reply) => {
+    closedContext = reply.sse
+    throw new Error('closed handler failed')
+  })
+
+  app.get('/kept', { sse: true }, async (request, reply) => {
+    keptContext = reply.sse
+    reply.sse.keepAlive()
+    throw new Error('kept handler failed')
+  })
+
+  const closedResponse = await app.inject({
+    url: '/closed',
+    headers: { accept: 'text/event-stream' }
+  })
+  const keptResponse = await app.inject({
+    url: '/kept',
+    headers: { accept: 'text/event-stream' }
+  })
+
+  assert.strictEqual(closedResponse.statusCode, 500)
+  assert.match(closedResponse.body, /closed handler failed/)
+  assert.strictEqual(closedContext.isConnected, false)
+  assert.strictEqual(keptResponse.statusCode, 500)
+  assert.match(keptResponse.body, /kept handler failed/)
+  assert.strictEqual(keptContext.isConnected, false)
 })

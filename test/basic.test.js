@@ -557,3 +557,130 @@ test('unknown sse kind throws at registration', async (t) => {
     /unknown sse kind 'maybe'/
   )
 })
+
+async function buildApp (t, options = {}) {
+  const app = Fastify({ logger: false })
+
+  t.after(async () => {
+    await app.close()
+  })
+
+  await app.register(fastifySSE, options)
+  return app
+}
+
+test('formats multiline Buffer messages', async (t) => {
+  const app = await buildApp(t, { heartbeatInterval: 0 })
+
+  app.get('/events', { sse: true }, async (request, reply) => {
+    await reply.sse.send(Buffer.from('first\nsecond'))
+  })
+
+  const response = await app.inject({
+    url: '/events',
+    headers: { accept: 'text/event-stream' }
+  })
+
+  assert.strictEqual(response.body, 'data: first\ndata: second\n\n')
+})
+
+test('leaves ordinary routes alone and falls back when Accept is missing', async (t) => {
+  const app = await buildApp(t, { heartbeatInterval: 0 })
+
+  app.get('/plain', async () => ({ plain: true }))
+  app.get('/events', { sse: true }, async (request, reply) => {
+    return { fallback: reply.sse === undefined }
+  })
+
+  const plainResponse = await app.inject({ url: '/plain' })
+  const fallbackResponse = await app.inject({ url: '/events' })
+
+  assert.deepStrictEqual(plainResponse.json(), { plain: true })
+  assert.deepStrictEqual(fallbackResponse.json(), { fallback: true })
+})
+
+test('parses SSE Accept parameters and optional whitespace', async (t) => {
+  const app = await buildApp(t, { heartbeatInterval: 0 })
+
+  app.get('/events', { sse: 'only' }, async (request, reply) => {
+    await reply.sse.send({ data: 'accepted' })
+  })
+
+  const cases = [
+    ['TEXT/EVENT-STREAM', 200],
+    ['text/event-streax', 406],
+    ['text/event-stream;q=', 200],
+    ['text/event-stream;q=1', 200],
+    ['text/event-stream;q=0.00', 406],
+    ['text/event-stream;q=0.01', 200],
+    ['text/event-stream ;q=0', 406],
+    ['text/*;q=0', 406],
+    ['application/json;foo=bar, text/event-stream', 200],
+    ['text/event-stream; q=0', 406],
+    ['text/event-stream;q=0;foo=bar', 406],
+    ['text/event-stream;Q=0', 406]
+  ]
+
+  for (const [accept, expectedStatus] of cases) {
+    const response = await app.inject({
+      url: '/events',
+      headers: { accept }
+    })
+
+    assert.strictEqual(response.statusCode, expectedStatus, accept)
+  }
+})
+
+test('rejects unsupported route option values', async (t) => {
+  const app = await buildApp(t, { heartbeatInterval: 0 })
+
+  assert.throws(
+    () => app.get('/invalid', { sse: 42 }, async () => {}),
+    /unsupported value for route option 'sse': 42/
+  )
+})
+
+test('preserves legacy fallback errors and describes missing Accept misuse', async (t) => {
+  const app = await buildApp(t, { heartbeatInterval: 0 })
+
+  app.get('/misuse', { sse: true }, async (request, reply) => {
+    await reply.sse.send({ data: 'value' })
+  })
+
+  app.get('/failure', { sse: true }, async () => {
+    throw new Error('fallback failed')
+  })
+
+  const misuseResponse = await app.inject({ url: '/misuse' })
+  const failureResponse = await app.inject({ url: '/failure' })
+
+  assert.strictEqual(misuseResponse.statusCode, 500)
+  assert.match(misuseResponse.body, /<missing>/)
+  assert.strictEqual(failureResponse.statusCode, 500)
+  assert.match(failureResponse.body, /fallback failed/)
+})
+
+test('supports route-level serializer and disabled heartbeat options', async (t) => {
+  const app = await buildApp(t, { heartbeatInterval: 1 })
+  let context
+
+  app.get('/events', {
+    sse: {
+      heartbeat: false,
+      serializer: (data) => `route:${data}`
+    }
+  }, async (request, reply) => {
+    context = reply.sse
+    reply.sse.keepAlive()
+    await reply.sse.send({ data: 'value' })
+    setTimeout(() => reply.sse.close(), 20)
+  })
+
+  const response = await app.inject({
+    url: '/events',
+    headers: { accept: 'text/event-stream' }
+  })
+
+  assert.strictEqual(response.body, 'data: route:value\n\n')
+  assert.strictEqual(context.heartbeatTimer, null)
+})
