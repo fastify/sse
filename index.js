@@ -555,13 +555,19 @@ class SSEContext {
         resolve()
       } else {
         // Handle backpressure
-        const onDrain = () => {
+        const removeListeners = () => {
+          this.reply.raw.off('drain', onDrain)
           this.reply.raw.off('error', onError)
+          this.reply.raw.off('close', onClose)
+        }
+
+        const onDrain = () => {
+          removeListeners()
           resolve()
         }
 
         const onError = (err) => {
-          this.reply.raw.off('drain', onDrain)
+          removeListeners()
           // Handle all errors gracefully - client disconnection is normal
           this.#isConnected = false
           this.cleanup()
@@ -569,8 +575,16 @@ class SSEContext {
           resolve() // Resolve instead of reject for graceful handling
         }
 
+        // A socket can close without emitting drain or error (half-close, peer gone),
+        // which would otherwise leave this write pending forever
+        const onClose = () => {
+          removeListeners()
+          resolve()
+        }
+
         this.reply.raw.once('drain', onDrain)
         this.reply.raw.once('error', onError)
+        this.reply.raw.once('close', onClose)
       }
     })
   }

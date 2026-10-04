@@ -83,3 +83,59 @@ test('handles a response error while waiting for drain', async (t) => {
   ])
   assert.strictEqual(context.isConnected, false)
 })
+
+test('settles a backpressured write when the response closes without drain or error', async (t) => {
+  const app = await buildApp(t, { heartbeatInterval: 0 })
+  let outcome
+  let listenersBefore
+  let listenersAfter
+  let context
+  let handlerDone
+
+  const finished = new Promise((resolve) => { handlerDone = resolve })
+  const counts = (raw) => ({
+    drain: raw.listenerCount('drain'),
+    error: raw.listenerCount('error'),
+    close: raw.listenerCount('close')
+  })
+
+  app.get('/events', { sse: true }, async (request, reply) => {
+    context = reply.sse
+    const raw = reply.raw
+    const originalWrite = raw.write
+    listenersBefore = counts(raw)
+
+    raw.write = function (...args) {
+      originalWrite.apply(this, args)
+      setImmediate(() => raw.emit('close'))
+      return false
+    }
+
+    let timer
+    outcome = await Promise.race([
+      reply.sse.send({ data: 'backpressure' }).then(() => 'settled'),
+      new Promise((resolve) => { timer = setTimeout(resolve, 1000, 'timed out') })
+    ])
+    clearTimeout(timer)
+    raw.write = originalWrite
+    listenersAfter = counts(raw)
+    handlerDone()
+  })
+
+  // The response is closed before it ends, so inject() reports it as destroyed.
+  await assert.rejects(
+    () => app.inject({
+      url: '/events',
+      headers: { accept: 'text/event-stream' }
+    }),
+    { message: 'response destroyed before completion' }
+  )
+  await finished
+
+  assert.strictEqual(outcome, 'settled')
+  assert.strictEqual(listenersAfter.drain, listenersBefore.drain)
+  assert.strictEqual(listenersAfter.error, listenersBefore.error)
+  // Emitting close also runs other once('close') listeners, so only check none were left behind
+  assert.ok(listenersAfter.close <= listenersBefore.close)
+  assert.strictEqual(context.isConnected, false)
+})
