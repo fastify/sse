@@ -235,6 +235,14 @@ function resolveSSEConfig (sseField) {
 
 const MISSING_SSE_ERROR_PATTERN = /Cannot read prop(?:erties)? of undefined.*'(?:send|stream|keepAlive|close|sendHeaders|replay|onClose)'/
 
+// CRLF, CR and LF all end a line in an event stream
+const LINE_BREAK = /\r\n|\r|\n/
+
+// A line break would end the id or event field and start a new one
+function toSingleLine (value) {
+  return String(value).replace(/[\r\n]/g, '')
+}
+
 /**
  * Format an SSE message according to the specification
  * @param {Object|string|Buffer} message - The message to format
@@ -246,30 +254,30 @@ function formatSSEMessage (message, serializer) {
 
   if (typeof message === 'string') {
     // Plain string message
-    for (const line of message.split('\n')) {
+    for (const line of message.split(LINE_BREAK)) {
       payload += `data: ${line}\n`
     }
   } else if (Buffer.isBuffer(message)) {
     // Buffer message
     const str = message.toString('utf-8')
-    for (const line of str.split('\n')) {
+    for (const line of str.split(LINE_BREAK)) {
       payload += `data: ${line}\n`
     }
   } else {
     // SSEMessage object
     if (message.id) {
-      payload += `id: ${message.id}\n`
+      payload += `id: ${toSingleLine(message.id)}\n`
     }
 
     if (message.event) {
-      payload += `event: ${message.event}\n`
+      payload += `event: ${toSingleLine(message.event)}\n`
     }
 
     if (message.data !== undefined) {
       // Always serialize the data to ensure consistent format
       const dataStr = serializer(message.data)
 
-      for (const line of dataStr.split('\n')) {
+      for (const line of dataStr.split(LINE_BREAK)) {
         payload += `data: ${line}\n`
       }
     }

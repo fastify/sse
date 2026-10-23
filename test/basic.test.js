@@ -684,3 +684,34 @@ test('supports route-level serializer and disabled heartbeat options', async (t)
   assert.strictEqual(response.body, 'data: route:value\n\n')
   assert.strictEqual(context.heartbeatTimer, null)
 })
+
+test('splits data on CR and CRLF line breaks', async (t) => {
+  const app = await buildApp(t, { heartbeatInterval: 0 })
+
+  app.get('/events', { sse: true }, async (request, reply) => {
+    await reply.sse.send('a\rb\r\nc')
+    await reply.sse.send(Buffer.from('d\re'))
+  })
+
+  const response = await app.inject({
+    url: '/events',
+    headers: { accept: 'text/event-stream' }
+  })
+
+  assert.strictEqual(response.body, 'data: a\ndata: b\ndata: c\n\ndata: d\ndata: e\n\n')
+})
+
+test('keeps id and event on a single line', async (t) => {
+  const app = await buildApp(t, { heartbeatInterval: 0 })
+
+  app.get('/events', { sse: true }, async (request, reply) => {
+    await reply.sse.send({ id: 'x\nevent: injected', event: 'e\r\ndata: injected', data: 'd' })
+  })
+
+  const response = await app.inject({
+    url: '/events',
+    headers: { accept: 'text/event-stream' }
+  })
+
+  assert.strictEqual(response.body, 'id: xevent: injected\nevent: edata: injected\ndata: "d"\n\n')
+})
