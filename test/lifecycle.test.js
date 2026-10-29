@@ -381,3 +381,52 @@ test('cleans up when handlers fail with and without keepAlive', async (t) => {
   assert.match(keptResponse.body, /kept handler failed/)
   assert.strictEqual(keptContext.isConnected, false)
 })
+
+test('reply.sse.signal lazily creates an AbortSignal and aborts on close', async (t) => {
+  const app = await buildApp(t, { heartbeatInterval: 0 })
+  let signalInHandler
+  let abortFired = false
+
+  app.get('/events', { sse: true }, async (request, reply) => {
+    const firstSignal = reply.sse.signal
+    const secondSignal = reply.sse.signal
+    assert.strictEqual(firstSignal, secondSignal)
+    assert.ok(firstSignal instanceof AbortSignal)
+    assert.strictEqual(firstSignal.aborted, false)
+
+    firstSignal.addEventListener('abort', () => {
+      abortFired = true
+    }, { once: true })
+
+    signalInHandler = firstSignal
+    await reply.sse.send({ data: 'value' })
+  })
+
+  const response = await app.inject({
+    url: '/events',
+    headers: { accept: 'text/event-stream' }
+  })
+
+  assert.strictEqual(response.statusCode, 200)
+  assert.strictEqual(signalInHandler.aborted, true)
+  assert.strictEqual(abortFired, true)
+})
+
+test('reply.sse.signal is already aborted when accessed after close', async (t) => {
+  const app = await buildApp(t, { heartbeatInterval: 0 })
+  let signalAfterClose
+
+  app.get('/events', { sse: true }, async (request, reply) => {
+    reply.sse.close()
+    signalAfterClose = reply.sse.signal
+    assert.strictEqual(signalAfterClose.aborted, true)
+  })
+
+  const response = await app.inject({
+    url: '/events',
+    headers: { accept: 'text/event-stream' }
+  })
+
+  assert.strictEqual(response.statusCode, 200)
+  assert.strictEqual(signalAfterClose.aborted, true)
+})

@@ -233,7 +233,7 @@ function resolveSSEConfig (sseField) {
   throw new FST_ERR_SSE_INVALID_OPTION(JSON.stringify(sseField))
 }
 
-const MISSING_SSE_ERROR_PATTERN = /Cannot read prop(?:erties)? of undefined.*'(?:send|stream|keepAlive|close|sendHeaders|replay|onClose)'/
+const MISSING_SSE_ERROR_PATTERN = /Cannot read prop(?:erties)? of undefined.*'(?:send|stream|keepAlive|close|sendHeaders|replay|onClose|signal)'/
 
 /**
  * Format an SSE message according to the specification
@@ -316,6 +316,7 @@ class SSEContext {
   #isConnected
   #keepAlive
   #headersSent
+  #abortController
 
   constructor (options) {
     this.reply = options.reply
@@ -323,6 +324,7 @@ class SSEContext {
     this.#isConnected = true
     this.#keepAlive = false
     this.#headersSent = false
+    this.#abortController = null
     this.heartbeatTimer = null
     this.heartbeatInterval = options.heartbeatInterval
     this.closeCallbacks = []
@@ -366,6 +368,21 @@ class SSEContext {
    */
   get shouldKeepAlive () {
     return this.#keepAlive
+  }
+
+  /**
+   * Gets an AbortSignal that aborts when the SSE connection closes.
+   * Lazily creates the underlying AbortController on first access.
+   * @returns {AbortSignal} AbortSignal tied to the SSE connection lifecycle
+   */
+  get signal () {
+    if (!this.#abortController) {
+      this.#abortController = new AbortController()
+      if (!this.#isConnected) {
+        this.#abortController.abort()
+      }
+    }
+    return this.#abortController.signal
   }
 
   /**
@@ -612,6 +629,10 @@ class SSEContext {
    */
   cleanup () {
     this.stopHeartbeat()
+
+    if (this.#abortController) {
+      this.#abortController.abort()
+    }
 
     // Call all close callbacks
     for (const callback of this.closeCallbacks) {

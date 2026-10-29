@@ -91,6 +91,8 @@ app.get('/test-reply', { sse: true }, async (request, reply) => {
   // Test properties
   expect(reply.sse.lastEventId).type.toBe<string | null>()
   expect(reply.sse.isConnected).type.toBe<boolean>()
+  expect(reply.sse.shouldKeepAlive).type.toBe<boolean>()
+  expect(reply.sse.signal).type.toBe<AbortSignal>()
 
   // Test send method with different sources
   expect(reply.sse.send('string')).type.toBe<Promise<void>>()
