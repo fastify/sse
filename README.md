@@ -254,6 +254,7 @@ fastify.get('/events', { sse: true }, async (request, reply) => {
 - `reply.sse.lastEventId`: Client's last received event ID (string | null)
 - `reply.sse.isConnected`: Connection status (boolean)
 - `reply.sse.shouldKeepAlive`: Whether connection should be kept alive after handler completion (boolean)
+- `reply.sse.signal`: Lazily created `AbortSignal` that aborts when the SSE connection closes (`AbortSignal`)
 
 #### Methods
 

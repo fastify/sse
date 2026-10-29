@@ -136,6 +136,11 @@ export interface SSEReplyInterface {
   readonly shouldKeepAlive: boolean
 
   /**
+   * AbortSignal that aborts when the SSE connection closes
+   */
+  readonly signal: AbortSignal
+
+  /**
    * Send HTTP headers for the SSE response if not already sent.
    * This method ensures headers set via reply.header() are transferred
    * to the raw response before writing the response head. The status code
