@@ -57,7 +57,10 @@ await fastify.register(require('@fastify/sse'), {
   heartbeatInterval: 30000,
 
   // Optional: default serializer (default: JSON.stringify)
-  serializer: (data) => JSON.stringify(data)
+  serializer: (data) => JSON.stringify(data),
+
+  // Optional: close active SSE contexts during server shutdown (default: false)
+  closeOnShutdown: false
 })
 ```
 

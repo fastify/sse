@@ -653,8 +653,19 @@ class SSEContext {
 async function fastifySSE (fastify, opts) {
   const {
     heartbeatInterval = 30000,
-    serializer = JSON.stringify
+    serializer = JSON.stringify,
+    closeOnShutdown = false
   } = opts
+
+  const activeContexts = closeOnShutdown ? new Set() : null
+
+  if (activeContexts !== null) {
+    fastify.addHook('preClose', async () => {
+      for (const context of activeContexts) {
+        context.close()
+      }
+    })
+  }
 
   // Add route-level SSE handler
   fastify.addHook('onRoute', (routeOptions) => {
@@ -718,6 +729,13 @@ async function fastifySSE (fastify, opts) {
         heartbeatInterval: sseOptions.heartbeat !== false ? heartbeatInterval : 0,
         serializer: sseOptions.serializer || serializer
       })
+
+      if (activeContexts !== null) {
+        activeContexts.add(context)
+        context.onClose(() => {
+          activeContexts.delete(context)
+        })
+      }
 
       // Store context on reply
       reply.sse = context

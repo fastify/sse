@@ -17,7 +17,8 @@ expect(app.register(fastifySSE, {
 })).type.toBeAssignableTo<FastifyInstance>()
 expect(app.register(fastifySSE, {
   heartbeatInterval: 0,
-  serializer: (data: any) => String(data)
+  serializer: (data: any) => String(data),
+  closeOnShutdown: true
 })).type.toBeAssignableTo<FastifyInstance>()
 
 // Test invalid plugin options
@@ -27,6 +28,10 @@ expect(app.register).type.not.toBeCallableWith(fastifySSE, {
 
 expect(app.register).type.not.toBeCallableWith(fastifySSE, {
   serializer: 123
+})
+
+expect(app.register).type.not.toBeCallableWith(fastifySSE, {
+  closeOnShutdown: 'invalid'
 })
 
 expect(app.register).type.not.toBeCallableWith(fastifySSE, {

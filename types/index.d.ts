@@ -58,6 +58,12 @@ export interface SSEPluginOptions {
    * @default JSON.stringify
    */
   serializer?: (data: any) => string
+
+  /**
+   * Gracefully close active SSE contexts when Fastify begins shutting down
+   * @default false
+   */
+  closeOnShutdown?: boolean
 }
 
 export interface SSEMessage {

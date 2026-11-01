@@ -381,3 +381,98 @@ test('cleans up when handlers fail with and without keepAlive', async (t) => {
   assert.match(keptResponse.body, /kept handler failed/)
   assert.strictEqual(keptContext.isConnected, false)
 })
+
+test('closeOnShutdown closes active keepAlive and streaming SSE contexts on fastify.close()', async () => {
+  const app = Fastify({ logger: false })
+  await app.register(fastifySSE, {
+    heartbeatInterval: 0,
+    closeOnShutdown: true
+  })
+
+  let keepAliveClosed = false
+  let streamClosed = false
+  let readyResolve
+  const bothReady = new Promise((resolve) => {
+    let count = 0
+    readyResolve = () => {
+      count++
+      if (count === 2) resolve()
+    }
+  })
+
+  app.get('/short', { sse: 'only' }, async (_request, reply) => {
+    await reply.sse.send({ data: 'done' })
+  })
+
+  app.get('/keep-alive', { sse: 'only' }, async (_request, reply) => {
+    reply.sse.keepAlive()
+    await reply.sse.send({ data: 'connected' })
+
+    const interval = setInterval(() => {
+      if (reply.sse.isConnected) {
+        reply.sse.send({ data: 'update' })
+      }
+    }, 50)
+
+    reply.sse.onClose(() => {
+      clearInterval(interval)
+      keepAliveClosed = true
+    })
+
+    readyResolve()
+  })
+
+  app.get('/awaited-stream', { sse: 'only' }, async (_request, reply) => {
+    let unblock
+    const wait = new Promise((resolve) => {
+      unblock = resolve
+    })
+
+    reply.sse.onClose(() => {
+      streamClosed = true
+      unblock()
+    })
+
+    async function * events () {
+      yield { data: 'first' }
+      readyResolve()
+      await wait
+      yield { data: 'second' }
+    }
+
+    await reply.sse.send(events())
+  })
+
+  const shortResponse = await app.inject({
+    url: '/short',
+    headers: { accept: 'text/event-stream' }
+  })
+  assert.strictEqual(shortResponse.statusCode, 200)
+  assert.match(shortResponse.body, /data: "done"/)
+
+  const keepAlivePromise = app.inject({
+    url: '/keep-alive',
+    headers: { accept: 'text/event-stream' }
+  })
+  const streamPromise = app.inject({
+    url: '/awaited-stream',
+    headers: { accept: 'text/event-stream' }
+  })
+
+  await bothReady
+
+  await app.close()
+
+  const [keepAliveResponse, streamResponse] = await Promise.all([
+    keepAlivePromise,
+    streamPromise
+  ])
+
+  assert.strictEqual(keepAliveClosed, true)
+  assert.strictEqual(streamClosed, true)
+  assert.strictEqual(keepAliveResponse.statusCode, 200)
+  assert.match(keepAliveResponse.body, /data: "connected"/)
+  assert.strictEqual(streamResponse.statusCode, 200)
+  assert.match(streamResponse.body, /data: "first"/)
+  assert.doesNotMatch(streamResponse.body, /second/)
+})
