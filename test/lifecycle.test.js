@@ -3,6 +3,7 @@
 const { test } = require('node:test')
 const { strict: assert } = require('node:assert')
 const Fastify = require('fastify')
+const { request } = require('undici')
 const fastifySSE = require('../index.js')
 const { setTimeout: sleep } = require('node:timers/promises')
 
@@ -380,4 +381,107 @@ test('cleans up when handlers fail with and without keepAlive', async (t) => {
   assert.strictEqual(keptResponse.statusCode, 500)
   assert.match(keptResponse.body, /kept handler failed/)
   assert.strictEqual(keptContext.isConnected, false)
+})
+
+test('keepAlive keeps connection open and sends headers without an initial write', async (t) => {
+  const app = await buildApp(t, { heartbeatInterval: 0 })
+  let delayedError = null
+
+  app.get('/deferred', { sse: 'only' }, async (request, reply) => {
+    reply.header('X-Deferred-SSE', 'true')
+    reply.sse.keepAlive()
+
+    setTimeout(async () => {
+      try {
+        await reply.sse.send({ id: '1', data: 'later' })
+        reply.sse.close()
+      } catch (err) {
+        delayedError = err
+      }
+    }, 20)
+  })
+
+  const response = await app.inject({
+    url: '/deferred',
+    headers: { accept: 'text/event-stream' }
+  })
+
+  assert.strictEqual(delayedError, null)
+  assert.strictEqual(response.statusCode, 200)
+  assert.strictEqual(response.headers['content-type'], 'text/event-stream')
+  assert.strictEqual(response.headers['x-deferred-sse'], 'true')
+  assert.ok(response.body.includes('id: 1'))
+  assert.ok(response.body.includes('data: "later"'))
+})
+
+test('keepAlive starts heartbeats without manual sendHeaders', async (t) => {
+  const app = await buildApp(t, { heartbeatInterval: 5 })
+  let context
+
+  app.get('/heartbeat-only', { sse: 'manual' }, async (request, reply) => {
+    context = reply.sse
+    reply.sse.keepAlive()
+    setTimeout(() => reply.sse.close(), 40)
+  })
+
+  const response = await app.inject({
+    url: '/heartbeat-only'
+  })
+
+  assert.strictEqual(response.statusCode, 200)
+  assert.strictEqual(response.headers['content-type'], 'text/event-stream')
+  assert.match(response.body, /: heartbeat\n\n/)
+  assert.strictEqual(context.heartbeatTimer, null)
+})
+
+test('keepAlive survives Fastify handlerTimeout after handler completes', async (t) => {
+  const app = Fastify({ logger: false, handlerTimeout: 50 })
+  t.after(async () => {
+    await app.close()
+  })
+  await app.register(fastifySSE, { heartbeatInterval: 0 })
+
+  app.get('/timed', { sse: 'only' }, async (request, reply) => {
+    reply.sse.keepAlive()
+    await reply.sse.send({ data: 'initial' })
+
+    setTimeout(async () => {
+      if (reply.sse.isConnected) {
+        await reply.sse.send({ data: 'after-handler-timeout' })
+      }
+      reply.sse.close()
+    }, 100)
+  })
+
+  await app.listen({ port: 0 })
+  const baseUrl = `http://localhost:${app.server.address().port}`
+
+  const res = await request(`${baseUrl}/timed`, {
+    headers: { accept: 'text/event-stream' }
+  })
+
+  assert.strictEqual(res.statusCode, 200)
+  const body = await res.body.text()
+  assert.ok(body.includes('data: "initial"'))
+  assert.ok(body.includes('data: "after-handler-timeout"'))
+})
+
+test('keepAlive does not commit headers if already closed before handler resolves', async (t) => {
+  const app = await buildApp(t, { heartbeatInterval: 0 })
+  let context
+
+  app.get('/closed-before-return', { sse: 'only' }, async (request, reply) => {
+    context = reply.sse
+    reply.sse.keepAlive()
+    reply.sse.close()
+  })
+
+  const response = await app.inject({
+    url: '/closed-before-return',
+    headers: { accept: 'text/event-stream' }
+  })
+
+  assert.strictEqual(response.statusCode, 200)
+  assert.strictEqual(context.isConnected, false)
+  assert.notStrictEqual(response.headers['content-type'], 'text/event-stream')
 })
