@@ -262,7 +262,7 @@ fastify.get('/events', { sse: true }, async (request, reply) => {
 - `reply.sse.keepAlive()`: Prevent connection from auto-closing after handler returns
 - `reply.sse.close()`: Manually close the connection
 - `reply.sse.replay(callback)`: Handle message replay using Last-Event-ID
-- `reply.sse.onClose(callback)`: Register callback for when connection closes
+- `reply.sse.onClose(callback)`: Register callback for when connection closes (if it is already closed, the callback runs on the next tick)
 - `reply.sse.sendHeaders(statusCode?)`: Manually send headers (called automatically on first write)
 
 ### Custom Response Status Code

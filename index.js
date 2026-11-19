@@ -309,6 +309,19 @@ function createSSETransformStream (options = {}) {
 }
 
 /**
+ * Calls a connection close callback, logging its error instead of throwing
+ * @param {Function} callback - The close callback
+ */
+function runCloseCallback (callback) {
+  try {
+    callback()
+  } catch (error) {
+    // Log error but don't throw
+    console.error('Error in SSE close callback:', error)
+  }
+}
+
+/**
  * SSE Context class for managing connection state
  */
 class SSEContext {
@@ -320,7 +333,9 @@ class SSEContext {
   constructor (options) {
     this.reply = options.reply
     this.#lastEventId = options.lastEventId || null
-    this.#isConnected = true
+    // The client may have gone before the handler ran (for example while an
+    // async hook was running), in which case 'close' has already fired
+    this.#isConnected = !this.reply.raw.destroyed
     this.#keepAlive = false
     this.#headersSent = false
     this.heartbeatTimer = null
@@ -396,9 +411,14 @@ class SSEContext {
 
   /**
    * Registers a callback to be called when the connection closes.
+   * If the connection is already closed, the callback runs on the next tick.
    * @param {Function} callback - Function to call on connection close
    */
   onClose (callback) {
+    if (!this.#isConnected) {
+      process.nextTick(runCloseCallback, callback)
+      return
+    }
     this.closeCallbacks.push(callback)
   }
 
@@ -615,12 +635,7 @@ class SSEContext {
 
     // Call all close callbacks
     for (const callback of this.closeCallbacks) {
-      try {
-        callback()
-      } catch (error) {
-        // Log error but don't throw
-        console.error('Error in SSE close callback:', error)
-      }
+      runCloseCallback(callback)
     }
 
     this.closeCallbacks = []

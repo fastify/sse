@@ -121,7 +121,8 @@ export interface SSEReplyInterface {
   replay(callback: (lastEventId: string) => Promise<void>): Promise<void>
 
   /**
-   * Register a callback for when the connection closes
+   * Register a callback for when the connection closes.
+   * If the connection is already closed, the callback runs on the next tick.
    */
   onClose(callback: () => void): void
 
