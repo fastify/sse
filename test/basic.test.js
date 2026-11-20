@@ -715,3 +715,21 @@ test('keeps id and event on a single line', async (t) => {
 
   assert.strictEqual(response.body, 'id: xevent: injected\nevent: edata: injected\ndata: "d"\n\n')
 })
+
+test('only writes retry when it is a positive integer', async (t) => {
+  const app = await buildApp(t, { heartbeatInterval: 0 })
+
+  app.get('/events', { sse: true }, async (request, reply) => {
+    await reply.sse.send({ data: 'a', retry: '1000\nevent: injected' })
+    await reply.sse.send({ data: 'b', retry: 1.5 })
+    await reply.sse.send({ data: 'c', retry: -1 })
+    await reply.sse.send({ data: 'd', retry: 2000 })
+  })
+
+  const response = await app.inject({
+    url: '/events',
+    headers: { accept: 'text/event-stream' }
+  })
+
+  assert.strictEqual(response.body, 'data: "a"\n\ndata: "b"\n\ndata: "c"\n\ndata: "d"\nretry: 2000\n\n')
+})

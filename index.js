@@ -282,7 +282,7 @@ function formatSSEMessage (message, serializer) {
       }
     }
 
-    if (message.retry) {
+    if (Number.isInteger(message.retry) && message.retry > 0) {
       payload += `retry: ${message.retry}\n`
     }
   }
