@@ -158,3 +158,60 @@ test('handles body.destroy() with streaming data', async (t) => {
   // Wait to ensure no uncaught exceptions occur
   await sleep(100)
 })
+
+test('reports a client that disconnected before the handler ran', async (t) => {
+  const app = Fastify({ logger: false })
+
+  t.after(async () => {
+    await app.close()
+  })
+
+  await app.register(require('../index.js'))
+
+  const controller = new AbortController()
+  let context
+  let sendResult
+  let closeCalls = 0
+  let closeCallsOnRegister
+  let handlerStarted
+  const started = new Promise((resolve) => { handlerStarted = resolve })
+
+  app.get('/sse', {
+    sse: true,
+    // Like a slow auth check: the client leaves before the handler runs
+    preHandler (request, reply, done) {
+      reply.raw.once('close', () => done())
+      controller.abort()
+    }
+  }, async (request, reply) => {
+    context = reply.sse
+    reply.sse.keepAlive()
+    reply.sse.onClose(() => { closeCalls++ })
+    closeCallsOnRegister = closeCalls
+    sendResult = reply.sse.send({ data: 'too late' }).then(
+      () => 'sent',
+      (err) => err.code
+    )
+    handlerStarted()
+    await sendResult
+  })
+
+  await app.listen({ port: 0 })
+  const baseUrl = `http://localhost:${app.server.address().port}`
+
+  await assert.rejects(request(`${baseUrl}/sse`, {
+    method: 'GET',
+    headers: {
+      Accept: 'text/event-stream'
+    },
+    signal: controller.signal
+  }), { name: 'AbortError' })
+
+  await started
+  assert.strictEqual(context.isConnected, false)
+  assert.strictEqual(await sendResult, 'FST_ERR_SSE_CONNECTION_CLOSED')
+  assert.strictEqual(context.heartbeatTimer, null)
+  assert.strictEqual(closeCallsOnRegister, 0)
+  await sleep(10)
+  assert.strictEqual(closeCalls, 1)
+})
