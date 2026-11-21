@@ -440,7 +440,10 @@ class SSEContext {
     if (!this.#headersSent) {
       this.reply.raw.setHeader('Content-Type', 'text/event-stream')
       this.reply.raw.setHeader('Cache-Control', 'no-cache')
-      this.reply.raw.setHeader('Connection', 'keep-alive')
+      // HTTP/2 forbids connection-specific headers (RFC 9113, section 8.2.2)
+      if (this.reply.request.raw.httpVersionMajor < 2) {
+        this.reply.raw.setHeader('Connection', 'keep-alive')
+      }
       this.reply.raw.setHeader('X-Accel-Buffering', 'no') // Disable Nginx buffering
 
       // Transfer headers set via reply.header() to the raw response
