@@ -485,3 +485,50 @@ test('keepAlive does not commit headers if already closed before handler resolve
   assert.strictEqual(context.isConnected, false)
   assert.notStrictEqual(response.headers['content-type'], 'text/event-stream')
 })
+
+test('keepAlive keeps request.signal aborting on client disconnect', async (t) => {
+  const app = Fastify({ logger: false })
+  t.after(async () => {
+    await app.close()
+  })
+  await app.register(fastifySSE, { heartbeatInterval: 0 })
+
+  let signal
+  app.get('/subscribe', { sse: 'only' }, async (request, reply) => {
+    signal = request.signal
+    reply.sse.keepAlive()
+    await reply.sse.send({ data: 'subscribed' })
+  })
+
+  await app.listen({ port: 0 })
+  const controller = new AbortController()
+  const res = await request(`http://localhost:${app.server.address().port}/subscribe`, {
+    headers: { accept: 'text/event-stream' },
+    signal: controller.signal
+  })
+  assert.strictEqual(res.statusCode, 200)
+  controller.abort()
+  await sleep(50)
+
+  assert.strictEqual(signal.aborted, true)
+})
+
+test('keepAlive ignores return value from handler after headers committed', async (t) => {
+  const app = await buildApp(t, { heartbeatInterval: 0 })
+
+  app.get('/return-value', { sse: 'only' }, async (request, reply) => {
+    reply.sse.keepAlive()
+    await reply.sse.send({ data: 'message' })
+    setTimeout(() => reply.sse.close(), 20)
+    return { shouldBeIgnored: true }
+  })
+
+  const response = await app.inject({
+    url: '/return-value',
+    headers: { accept: 'text/event-stream' }
+  })
+
+  assert.strictEqual(response.statusCode, 200)
+  assert.strictEqual(response.headers['content-type'], 'text/event-stream')
+  assert.ok(response.body.includes('data: "message"'))
+})

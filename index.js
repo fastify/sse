@@ -734,12 +734,15 @@ async function fastifySSE (fastify, opts) {
 
       if (!context.shouldKeepAlive) {
         context.close()
-      } else if (context.isConnected) {
-        context.sendHeaders()
-        reply.hijack()
+        return res
       }
 
-      return res
+      if (context.isConnected) {
+        context.sendHeaders()
+        if (request.routeOptions.handlerTimeout > 0) {
+          reply.hijack()
+        }
+      }
     }
   })
 }
